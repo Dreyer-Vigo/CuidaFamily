@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "709396279782",
+    "project_id": "cuidafamily",
+    "storage_bucket": "cuidafamily.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:709396279782:android:9a525d0a9dc8a3424da627",
+        "android_client_info": {
+          "package_name": "com.example.cuidafamily"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDP9DJmc1AkG4HTlQ5S4UR5b0SJy_ECjD8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
