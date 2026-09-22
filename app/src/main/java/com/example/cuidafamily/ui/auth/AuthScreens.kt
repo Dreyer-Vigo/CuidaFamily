@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SupervisorAccount
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -40,6 +42,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -65,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,9 +88,7 @@ import com.example.cuidafamily.ui.theme.TextoSecundario
 import com.example.cuidafamily.ui.util.AppBackgroundDecorated
 import com.example.cuidafamily.ui.util.GradientButton
 
-/**
- * Componente de Logo compartido para el flujo de autenticación.
- */
+
 @Composable
 fun AuthLogo(modifier: Modifier = Modifier) {
     Box(
@@ -112,9 +114,7 @@ fun AuthLogo(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Enumeración interna para guiar la navegación del flujo en memoria.
- */
+
 enum class AuthScreenDestination {
     LOGIN,
     REGISTRO,
@@ -137,7 +137,7 @@ fun AuthFlowContainer(
                 AuthScreenDestination.LOGIN -> {
                     LoginScreen(
                         uiState = uiState,
-                        onEmailOrPhoneChanged = viewModel::onCorreoOTelefonoChanged,
+                        onEmailChanged = viewModel::onEmailChanged,
                         onPasswordChanged = viewModel::onContraseniaChanged,
                         onLoginClick = {
                             viewModel.login()
@@ -152,8 +152,9 @@ fun AuthFlowContainer(
                     RegistroScreen(
                         uiState = uiState,
                         onNombreChanged = viewModel::onNombreChanged,
-                        onEmailOrPhoneChanged = viewModel::onCorreoOTelefonoChanged,
+                        onEmailChanged = viewModel::onEmailChanged,
                         onPasswordChanged = viewModel::onContraseniaChanged,
+                        onConfirmarPasswordChanged = viewModel::onConfirmarContraseniaChanged,
                         onNextClick = { 
                             viewModel.resetAuthStatus()
                             currentScreen = AuthScreenDestination.SELECCION_ROL 
@@ -194,7 +195,7 @@ fun AuthFlowContainer(
                 }
             }
 
-            // Manejo de Estados de Carga superpuestos
+
             when (val status = uiState.authStatus) {
                 is AuthStatus.Loading -> {
                     Box(
@@ -222,7 +223,7 @@ fun AuthFlowContainer(
                                 textAlign = TextAlign.Center,
                                 color = TextoSecundario
                             )
-                            Spacer(modifier = Modifier.height(32.dp))
+                            Spacer(modifier = Modifier.height(24.dp))
                             GradientButton(
                                 text = "Comenzar ahora",
                                 onClick = {
@@ -257,7 +258,7 @@ fun AuthFlowContainer(
                         }
                     }
                 }
-                AuthStatus.Idle -> { /* No hacer nada */ }
+                AuthStatus.Idle -> { }
             }
         }
     }
@@ -267,7 +268,7 @@ fun AuthFlowContainer(
 @Composable
 fun LoginScreen(
     uiState: AuthUiState,
-    onEmailOrPhoneChanged: (String) -> Unit,
+    onEmailChanged: (String) -> Unit,
     onPasswordChanged: (String) -> Unit,
     onLoginClick: () -> Unit,
     onNavigateToRegister: () -> Unit
@@ -300,11 +301,11 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             OutlinedTextField(
-                value = uiState.correoOTelefono,
-                onValueChange = onEmailOrPhoneChanged,
-                label = { Text("Correo o Teléfono") },
+                value = uiState.email,
+                onValueChange = onEmailChanged,
+                label = { Text("Correo electrónico") },
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.White,
                     focusedContainerColor = Color.White,
@@ -354,8 +355,9 @@ fun LoginScreen(
 fun RegistroScreen(
     uiState: AuthUiState,
     onNombreChanged: (String) -> Unit,
-    onEmailOrPhoneChanged: (String) -> Unit,
+    onEmailChanged: (String) -> Unit,
     onPasswordChanged: (String) -> Unit,
+    onConfirmarPasswordChanged: (String) -> Unit,
     onNextClick: () -> Unit,
     onNavigateToLogin: () -> Unit
 ) {
@@ -401,11 +403,38 @@ fun RegistroScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
-                value = uiState.correoOTelefono,
-                onValueChange = onEmailOrPhoneChanged,
-                label = { Text("Correo o Teléfono") },
+                value = uiState.email,
+                onValueChange = onEmailChanged,
+                label = { Text("Correo electrónico") },
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = Color.White,
+                    focusedContainerColor = Color.White,
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            var passwordVisible by remember { mutableStateOf(false) }
+            var confirmPasswordVisible by remember { mutableStateOf(false) }
+            val passwordsMatch = uiState.contrasenia == uiState.confirmarContrasenia
+            val showMatchError = uiState.confirmarContrasenia.isNotEmpty() && !passwordsMatch
+
+            OutlinedTextField(
+                value = uiState.contrasenia,
+                onValueChange = onPasswordChanged,
+                label = { Text("Contraseña") },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(imageVector = image, contentDescription = if (passwordVisible) "Ocultar" else "Mostrar")
+                    }
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.White,
                     focusedContainerColor = Color.White,
@@ -416,10 +445,17 @@ fun RegistroScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
-                value = uiState.contrasenia,
-                onValueChange = onPasswordChanged,
-                label = { Text("Contraseña") },
-                visualTransformation = PasswordVisualTransformation(),
+                value = uiState.confirmarContrasenia,
+                onValueChange = onConfirmarPasswordChanged,
+                label = { Text("Confirmar contraseña") },
+                visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    val image = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                    IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                        Icon(imageVector = image, contentDescription = if (confirmPasswordVisible) "Ocultar" else "Mostrar")
+                    }
+                },
+                isError = showMatchError,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -429,12 +465,25 @@ fun RegistroScreen(
                 shape = RoundedCornerShape(16.dp)
             )
 
+            if (showMatchError) {
+                Text(
+                    text = "Las contraseñas no coinciden",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.height(40.dp))
 
             GradientButton(
                 text = "Siguiente: Elegir Rol",
                 onClick = onNextClick,
-                enabled = uiState.nombre.isNotBlank() && uiState.correoOTelefono.isNotBlank() && uiState.contrasenia.isNotBlank(),
+                enabled = uiState.nombre.isNotBlank() && 
+                        uiState.email.isNotBlank() && 
+                        uiState.contrasenia.isNotBlank() && 
+                        uiState.confirmarContrasenia.isNotBlank() && 
+                        passwordsMatch,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -603,7 +652,7 @@ fun SubtipoRolScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 if (role == Role.COLABORADOR) {
-                    // Vista simplificada para Colaborador: Solo campo de texto libre
+
                     Text(
                         text = "Escribe tu relación con la persona bajo cuidado para que el resto del equipo te identifique.",
                         fontSize = 14.sp,
@@ -623,7 +672,7 @@ fun SubtipoRolScreen(
                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false)
                     )
                 } else {
-                    // Opciones fijas para Admin y Cuidador Externo
+
                     options.forEach { option ->
                         OptionCard(
                             title = option,

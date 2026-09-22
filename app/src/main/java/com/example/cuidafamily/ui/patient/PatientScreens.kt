@@ -291,25 +291,25 @@ fun PatientFormScreen(
 ) {
     val context = LocalContext.current
     
-    // 1. Datos Personales
+
     var nombre by remember { mutableStateOf(patient?.nombre ?: "") }
     var fechaNacimiento by remember { mutableStateOf(patient?.fechaNacimiento ?: "") }
     var dni by remember { mutableStateOf(patient?.dni ?: "") }
     var fotoUrl by remember { mutableStateOf(patient?.fotoUrl) }
 
-    // 2. Datos Clínicos
+
     var grupoSanguineo by remember { mutableStateOf(patient?.grupoSanguineo ?: "O+") }
     var pesoStr by remember { mutableStateOf(patient?.pesoActual?.toString() ?: "") }
     var historiaClinica by remember { mutableStateOf(patient?.historiaClinica ?: "") }
     var seguroSalud by remember { mutableStateOf(patient?.seguroSalud ?: "") }
     var medicoTratante by remember { mutableStateOf(patient?.medicoTratante ?: "") }
 
-    // 3. Contacto de Emergencia
+
     var contactoEmergenciaNombre by remember { mutableStateOf(patient?.contactoEmergenciaNombre ?: "") }
     var contactoEmergenciaTelefono by remember { mutableStateOf(patient?.contactoEmergenciaTelefono ?: "") }
     var contactoEmergenciaRelacion by remember { mutableStateOf(patient?.contactoEmergenciaRelacion ?: "") }
 
-    // 4. Secciones de Texto
+
     var enfermedadesCronicas by remember { mutableStateOf(patient?.enfermedadesCronicas ?: "") }
     var medicamentosActuales by remember { mutableStateOf(patient?.medicamentosActuales ?: "") }
     var infoAdicional by remember { mutableStateOf(patient?.informacionAdicional ?: "") }
@@ -366,7 +366,7 @@ fun PatientFormScreen(
             color = MaterialTheme.colorScheme.primary
         )
 
-        // --- SECCIÓN 1: DATOS PERSONALES ---
+
         PatientFormSection(title = "Datos Personales") {
             Box(
                 modifier = Modifier
@@ -426,7 +426,7 @@ fun PatientFormScreen(
             )
         }
 
-        // --- SECCIÓN 2: DATOS CLÍNICOS ---
+
         PatientFormSection(title = "Datos Clínicos") {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ExposedDropdownMenuBox(
@@ -497,7 +497,7 @@ fun PatientFormScreen(
             )
         }
 
-        // --- SECCIÓN 3: CONTACTO DE EMERGENCIA ---
+
         PatientFormSection(title = "Contacto de Emergencia") {
             OutlinedTextField(value = contactoEmergenciaNombre, onValueChange = { contactoEmergenciaNombre = it }, label = { Text("Nombre del Contacto") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -506,14 +506,14 @@ fun PatientFormScreen(
             }
         }
 
-        // --- SECCIÓN 4: ANTECEDENTES Y MEDICACIÓN ---
+
         PatientFormSection(title = "Antecedentes y Tratamiento") {
             OutlinedTextField(value = enfermedadesCronicas, onValueChange = { enfermedadesCronicas = it }, label = { Text("Enfermedades Crónicas") }, modifier = Modifier.fillMaxWidth(), minLines = 3, shape = RoundedCornerShape(12.dp))
             OutlinedTextField(value = medicamentosActuales, onValueChange = { medicamentosActuales = it }, label = { Text("Medicamentos Actuales") }, modifier = Modifier.fillMaxWidth(), minLines = 3, shape = RoundedCornerShape(12.dp))
             OutlinedTextField(value = infoAdicional, onValueChange = { infoAdicional = it }, label = { Text("Notas Adicionales (Opcional)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(12.dp))
         }
 
-        // --- SECCIÓN 5: ALERGIAS ---
+
         Text("Alergias e Intolerancias", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
         if (alergiasList.isEmpty()) {
             Text("No se han registrado alergias. Puede añadirlas debajo.", fontSize = 13.sp, color = TextoSecundario)
@@ -621,7 +621,7 @@ fun PatientDetailsScreen(
     val esAdmin = userRole == Role.ADMINISTRADOR_FAMILIAR
     var showAllergyDialog by remember { mutableStateOf(false) }
 
-    // Estados para Diálogos de Edición Rápida
+
     var showEditPersonal by remember { mutableStateOf(false) }
     var showEditClinical by remember { mutableStateOf(false) }
     var showEditEmergency by remember { mutableStateOf(false) }
@@ -662,7 +662,7 @@ fun PatientDetailsScreen(
             }
         }
 
-        // 1. Tarjeta Personal (Nombre, Foto, Edad, DNI)
+
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(28.dp),
@@ -734,7 +734,7 @@ fun PatientDetailsScreen(
             }
         }
 
-        // 3. Datos Clínicos
+
         PatientInfoSectionCard(
             title = "Datos Clínicos",
             icon = Icons.Default.MedicalInformation,
@@ -749,7 +749,7 @@ fun PatientDetailsScreen(
             }
         }
 
-        // 4. Contacto de Emergencia
+
         PatientInfoSectionCard(
             title = "Contacto de Emergencia",
             icon = Icons.Default.ContactEmergency,
@@ -767,7 +767,7 @@ fun PatientDetailsScreen(
             }
         }
 
-        // 5. Enfermedades Crónicas
+
         PatientInfoSectionCard(
             title = "Enfermedades Crónicas",
             icon = Icons.Default.HistoryEdu,
@@ -778,7 +778,7 @@ fun PatientDetailsScreen(
             Text(patient.enfermedadesCronicas.ifBlank { "Ninguna registrada." }, fontSize = 14.sp, lineHeight = 20.sp)
         }
 
-        // 6. Medicamentos Actuales
+
         PatientInfoSectionCard(
             title = "Medicamentos Actuales",
             icon = Icons.Default.Medication,
@@ -833,7 +833,7 @@ fun PatientDetailsScreen(
         Spacer(modifier = Modifier.height(32.dp))
     }
 
-    // --- DIÁLOGOS DE EDICIÓN RÁPIDA ---
+
     if (showEditPersonal) {
         QuickEditDialog(
             title = "Editar Datos Personales",
@@ -935,7 +935,7 @@ fun PatientDetailsScreen(
                     showEditWeight = false
                 })
             }
-            emptyMap<String, Any>() // no direct fields to update here as it uses a function
+            emptyMap<String, Any>()
         }
     }
 
@@ -1110,9 +1110,7 @@ fun QuickEditDialog(
     }
 }
 
-/**
- * Tarjeta de alergia detallada con badge de severidad y colores semafóricos.
- */
+
 @Composable
 fun AlergiaTarjetaDescriptiva(
     allergy: Allergy,
@@ -1134,7 +1132,7 @@ fun AlergiaTarjetaDescriptiva(
         border = BorderStroke(1.dp, strokeColor.copy(alpha = 0.1f))
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            // Borde izquierdo de severidad
+
             Box(
                 modifier = Modifier
                     .width(6.dp)
@@ -1158,7 +1156,7 @@ fun AlergiaTarjetaDescriptiva(
                             )
                         }
 
-                        // Badge de Severidad
+
                         Surface(
                             color = bgColor,
                             shape = RoundedCornerShape(8.dp),

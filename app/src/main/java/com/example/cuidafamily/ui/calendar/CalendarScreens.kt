@@ -1,6 +1,7 @@
 package com.example.cuidafamily.ui.calendar
 
 import android.Manifest
+import android.util.Log
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,6 +43,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
@@ -54,6 +57,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -125,6 +129,8 @@ fun CalendarScreenContainer(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var eventToEdit by remember { mutableStateOf<CalendarEvent?>(null) }
+    var eventToDelete by remember { mutableStateOf<CalendarEvent?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -332,7 +338,10 @@ fun CalendarScreenContainer(
                                 TarjetaEventoAnimada(
                                     event = event,
                                     mostrarFecha = selectedViewIndex == 1,
+                                    canWrite = uiState.canWrite,
                                     onCompletarClick = { viewModel.completarEvento(event.id) },
+                                    onEditClick = { eventToEdit = event },
+                                    onDeleteClick = { eventToDelete = event },
                                     onClick = {
                                         if (selectedViewIndex == 1) {
                                             viewModel.seleccionarDia(event.fecha)
@@ -348,29 +357,80 @@ fun CalendarScreenContainer(
             Spacer(modifier = Modifier.height(40.dp))
         }
 
-        if (showCreateDialog) {
+        if (showCreateDialog || eventToEdit != null) {
             FormularioCrearEventoDialog(
                 diaSeleccionado = uiState.diaSeleccionado,
-                initialEvent = null,
-                onDismiss = { showCreateDialog = false },
-                onSave = { titulo, tipo, fecha, horaI, horaF, nota ->
-                    viewModel.agregarEvento(
-                        titulo = titulo,
-                        tipo = tipo,
-                        fecha = fecha,
-                        horaInicio = horaI,
-                        horaFin = horaF,
-                        notas = nota.ifBlank { null },
-                        asignadoAUserId = "MOCK_USER_ID",
-                        asignadoANombre = "Miembro Familiar",
-                        asignadoARol = Role.COLABORADOR,
-                        creadoPorUserId = "CREATOR_ID"
-                    )
+                initialEvent = eventToEdit,
+                onDismiss = { 
                     showCreateDialog = false
+                    eventToEdit = null
+                },
+                onSave = { titulo, tipo, fecha, horaI, horaF, nota ->
+                    if (eventToEdit != null) {
+                        viewModel.modificarEvento(
+                            eventToEdit!!.copy(
+                                titulo = titulo,
+                                tipo = tipo,
+                                fecha = fecha,
+                                horaInicio = horaI,
+                                horaFin = horaF,
+                                notas = nota.ifBlank { null }
+                            )
+                        )
+                    } else {
+                        viewModel.agregarEvento(
+                            titulo = titulo,
+                            tipo = tipo,
+                            fecha = fecha,
+                            horaInicio = horaI,
+                            horaFin = horaF,
+                            notas = nota.ifBlank { null },
+                            asignadoAUserId = null,
+                            asignadoANombre = null,
+                            asignadoARol = null,
+                            creadoPorUserId = "CREATOR_ID" // Debería venir del AuthState real
+                        )
+                    }
+                    showCreateDialog = false
+                    eventToEdit = null
+                }
+            )
+        }
+
+        if (eventToDelete != null) {
+            EliminarEventoConfirmDialog(
+                onDismiss = { eventToDelete = null },
+                onConfirm = {
+                    viewModel.borrarEvento(eventToDelete!!.id)
+                    eventToDelete = null
                 }
             )
         }
     }
+}
+
+@Composable
+fun EliminarEventoConfirmDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Eliminar actividad?", fontWeight = FontWeight.Bold) },
+        text = { Text("Esta acción quitará el evento del calendario compartido de la familia. No se puede deshacer.") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Eliminar", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = TextoSecundario)
+            }
+        },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color.White
+    )
 }
 
 @Composable
@@ -465,77 +525,121 @@ fun GrillaCalendario(
 fun TarjetaEventoAnimada(
     event: CalendarEvent, 
     mostrarFecha: Boolean = false,
+    canWrite: Boolean = false,
     onCompletarClick: () -> Unit,
+    onEditClick: () -> Unit = {},
+    onDeleteClick: () -> Unit = {},
     onClick: (() -> Unit)? = null
 ) {
     val accentColor = obtenerColorPorTipo(event.tipo)
     
+    var showMenu by remember { mutableStateOf(false) }
+    val esAdminOColab = canWrite
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+            .then(
+                if (esAdminOColab) {
+                    Modifier.clickable {
+                        Log.d("CalendarScreens", "Tarjeta de evento tocada: ${event.titulo}, rol: $canWrite")
+                        showMenu = true
+                    }
+                } else if (onClick != null) {
+                    Modifier.clickable { onClick() }
+                } else {
+                    Modifier
+                }
+            ),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .height(IntrinsicSize.Min)
-                .fillMaxWidth()
-        ) {
-            Box(
+        Box {
+            Row(
                 modifier = Modifier
-                    .width(6.dp)
-                    .fillMaxHeight()
-                    .background(accentColor)
-            )
-            
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    .height(IntrinsicSize.Min)
+                    .fillMaxWidth()
+            ) {
                 Box(
-                    modifier = Modifier.size(44.dp).background(accentColor.copy(alpha = 0.1f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (event.tipo == TipoEvento.CITA_MEDICA) Icons.Default.Schedule else Icons.Default.Groups,
-                        contentDescription = null,
-                        tint = accentColor,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    if (mostrarFecha) {
-                        Text(
-                            text = formatearFechaLegible(event.fecha),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                            modifier = Modifier.padding(bottom = 2.dp)
+                    modifier = Modifier
+                        .width(6.dp)
+                        .fillMaxHeight()
+                        .background(accentColor)
+                )
+                
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(44.dp).background(accentColor.copy(alpha = 0.1f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (event.tipo == TipoEvento.CITA_MEDICA) Icons.Default.Schedule else Icons.Default.Groups,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                    Text(
-                        text = event.titulo,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = if (event.completado) Color.Gray else MaterialTheme.colorScheme.onSurface
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                        Icon(Icons.Default.Schedule, contentDescription = null, tint = TextoSecundario, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
-                        val rangeText = "${event.horaInicio.format(timeFormatter)} - ${event.horaFin.format(timeFormatter)}"
-                        Text(text = rangeText, fontSize = 12.sp, color = TextoSecundario)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        if (mostrarFecha) {
+                            Text(
+                                text = formatearFechaLegible(event.fecha),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = event.titulo,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = if (event.completado) Color.Gray else MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = TextoSecundario, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+                            val rangeText = "${event.horaInicio.format(timeFormatter)} - ${event.horaFin.format(timeFormatter)}"
+                            Text(text = rangeText, fontSize = 12.sp, color = TextoSecundario)
+                        }
+                    }
+                    
+                    if (!event.completado) {
+                        Checkbox(
+                            checked = false,
+                            onCheckedChange = { onCompletarClick() },
+                            colors = CheckboxDefaults.colors(checkedColor = LavandaPrimary)
+                        )
+                    } else {
+                        Text("✓", color = VerdeExito, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
-                if (!event.completado) {
-                    Checkbox(
-                        checked = false,
-                        onCheckedChange = { onCompletarClick() },
-                        colors = CheckboxDefaults.colors(checkedColor = LavandaPrimary)
-                    )
-                } else {
-                    Text("✓", color = VerdeExito, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                }
+            }
+
+            // Menú de opciones para Admin/Colaborador
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                modifier = Modifier.background(Color.White)
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Editar", fontWeight = FontWeight.Medium) },
+                    leadingIcon = { Icon(Icons.Default.Edit, null, tint = LavandaPrimary) },
+                    onClick = {
+                        showMenu = false
+                        onEditClick()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Eliminar", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium) },
+                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteClick()
+                    }
+                )
             }
         }
     }
@@ -560,6 +664,7 @@ fun FormularioCrearEventoDialog(
     onDismiss: () -> Unit,
     onSave: (String, TipoEvento, String, LocalTime, LocalTime, String) -> Unit
 ) {
+    val isEditing = initialEvent != null
     var titulo by remember { mutableStateOf(initialEvent?.titulo ?: "") }
     var tipo by remember { mutableStateOf(initialEvent?.tipo ?: TipoEvento.CITA_MEDICA) }
     var fechaSeleccionada by remember { mutableStateOf(initialEvent?.fecha ?: diaSeleccionado) }
@@ -587,7 +692,12 @@ fun FormularioCrearEventoDialog(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Agendar Nueva Actividad", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = if (isEditing) "Editar Actividad" else "Agendar Nueva Actividad", 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 20.sp, 
+                    color = MaterialTheme.colorScheme.primary
+                )
 
                 OutlinedTextField(
                     value = titulo,

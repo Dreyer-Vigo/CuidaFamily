@@ -31,8 +31,9 @@ sealed class AuthStatus {
  */
 data class AuthUiState(
     val nombre: String = "",
-    val correoOTelefono: String = "",
+    val email: String = "",
     val contrasenia: String = "",
+    val confirmarContrasenia: String = "",
     val selectedRole: Role? = null,
     val familyGroupId: String? = null,
     val codigoInvitacion: String = "",
@@ -44,8 +45,10 @@ data class AuthUiState(
     // Lógica para habilitar el botón de registro final
     val isRegisterEnabled: Boolean
         get() = nombre.isNotBlank() &&
-                correoOTelefono.isNotBlank() &&
+                email.isNotBlank() &&
                 contrasenia.isNotBlank() &&
+                confirmarContrasenia.isNotBlank() &&
+                contrasenia == confirmarContrasenia &&
                 selectedRole != null &&
                 when (selectedRole) {
                     Role.ADMINISTRADOR_FAMILIAR -> nombreGrupo.isNotBlank()
@@ -69,12 +72,16 @@ class AuthViewModel : ViewModel() {
         _uiState.update { it.copy(nombre = nombre) }
     }
 
-    fun onCorreoOTelefonoChanged(input: String) {
-        _uiState.update { it.copy(correoOTelefono = input) }
+    fun onEmailChanged(input: String) {
+        _uiState.update { it.copy(email = input) }
     }
 
     fun onContraseniaChanged(pass: String) {
         _uiState.update { it.copy(contrasenia = pass) }
+    }
+
+    fun onConfirmarContraseniaChanged(pass: String) {
+        _uiState.update { it.copy(confirmarContrasenia = pass) }
     }
 
     fun onRoleSelected(role: Role) {
@@ -110,14 +117,14 @@ class AuthViewModel : ViewModel() {
      */
     fun login() {
         val currentState = _uiState.value
-        if (currentState.correoOTelefono.isBlank() || currentState.contrasenia.isBlank()) {
+        if (currentState.email.isBlank() || currentState.contrasenia.isBlank()) {
             _uiState.update { it.copy(authStatus = AuthStatus.Error("Completa todos los campos")) }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(authStatus = AuthStatus.Loading) }
-            val result = AuthRepository.login(currentState.correoOTelefono, currentState.contrasenia)
+            val result = AuthRepository.login(currentState.email, currentState.contrasenia)
             when (result) {
                 is Result.Success -> {
                     val user = result.data
@@ -140,14 +147,19 @@ class AuthViewModel : ViewModel() {
      */
     fun registrarUsuarioYConfigurarGrupo() {
         val currentState = _uiState.value
-        if (!currentState.isRegisterEnabled) return
+        if (!currentState.isRegisterEnabled) {
+            if (currentState.contrasenia != currentState.confirmarContrasenia) {
+                _uiState.update { it.copy(authStatus = AuthStatus.Error("Las contraseñas no coinciden")) }
+            }
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(authStatus = AuthStatus.Loading) }
 
             val registroResult = AuthRepository.registrar(
                 currentState.nombre,
-                currentState.correoOTelefono,
+                currentState.email,
                 currentState.contrasenia
             )
 

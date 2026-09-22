@@ -48,20 +48,15 @@ object AuthRepository {
     /**
      * Registra un nuevo usuario en Firebase Auth y guarda su perfil inicial en Firestore.
      */
-    suspend fun registrar(nombre: String, correoOTelefono: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
+    suspend fun registrar(nombre: String, email: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
         try {
-            val esCorreo = correoOTelefono.contains("@")
-            if (!esCorreo) {
-                return@withContext Result.Error(Exception("El registro por teléfono requiere flujo OTP manual. Use correo para esta versión."))
-            }
-
-            val authResult = auth.createUserWithEmailAndPassword(correoOTelefono, contrasenia).await()
+            val authResult = auth.createUserWithEmailAndPassword(email, contrasenia).await()
             val userId = authResult.user?.uid ?: throw Exception("No se pudo obtener el ID de usuario.")
 
             val nuevoUsuario = User(
                 id = userId,
                 nombre = nombre,
-                correo = correoOTelefono,
+                correo = email,
                 telefono = ""
             )
 
@@ -76,14 +71,9 @@ object AuthRepository {
     /**
      * Realiza el inicio de sesión y recupera el perfil completo del usuario.
      */
-    suspend fun login(correoOTelefono: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
+    suspend fun login(email: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
         try {
-            val esCorreo = correoOTelefono.contains("@")
-            if (!esCorreo) {
-                return@withContext Result.Error(Exception("Login por teléfono no implementado en esta versión."))
-            }
-
-            val authResult = auth.signInWithEmailAndPassword(correoOTelefono, contrasenia).await()
+            val authResult = auth.signInWithEmailAndPassword(email, contrasenia).await()
             val userId = authResult.user?.uid ?: throw Exception("Error de sesión.")
 
             val userDoc = db.collection("users").document(userId).get().await()
@@ -131,15 +121,13 @@ object AuthRepository {
                 subtipo = subtipo,
                 fechaIngreso = obtenerFechaActualISO8601()
             )
-            // Correction: let's use the ISO date function
-            val miembroAdminCorrecto = miembroAdmin.copy(fechaIngreso = obtenerFechaActualISO8601())
 
             val batch = db.batch()
             val groupRef = db.collection("familyGroups").document(groupId)
             val userRef = db.collection("users").document(adminUserId)
 
             batch.set(groupRef, nuevoGrupo)
-            batch.set(groupRef.collection("members").document(adminUserId), miembroAdminCorrecto)
+            batch.set(groupRef.collection("members").document(adminUserId), miembroAdmin)
             
             // Actualización del perfil del usuario
             batch.update(userRef, "familyGroupId", groupId)
@@ -326,14 +314,6 @@ object AuthRepository {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         sdf.timeZone = TimeZone.getTimeZone("UTC")
         return sdf.format(Date())
-    }
-    
-    private fun obtenerNombreMes(mes: Int): String {
-        return when (mes) {
-            1 -> "Enero" 2 -> "Febrero" 3 -> "Marzo" 4 -> "Abril" 5 -> "Mayo" 6 -> "Junio"
-            7 -> "Julio" 8 -> "Agosto" 9 -> "Septiembre" 10 -> "Octubre" 11 -> "Noviembre" 12 -> "Diciembre"
-            else -> ""
-        }
     }
 
     /**
