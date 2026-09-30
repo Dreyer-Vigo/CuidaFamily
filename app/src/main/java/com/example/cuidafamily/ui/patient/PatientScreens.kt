@@ -113,7 +113,12 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import com.example.cuidafamily.ui.sos.SosFloatingButton
 
+/**
+ * Contenedor principal de la pantalla de Ficha Médica.
+ * Administra el estado de carga y determina la vista activa (Estado Vacío, Formulario de Registro/Edición o Vista de Detalles).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PatientScreenContainer(
@@ -121,7 +126,8 @@ fun PatientScreenContainer(
     familyGroupId: String,
     userRole: Role,
     userName: String,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onSosClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var isEditing by remember { mutableStateOf(false) }
@@ -161,6 +167,9 @@ fun PatientScreenContainer(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
+        },
+        floatingActionButton = {
+            SosFloatingButton(onClick = onSosClick)
         }
     ) { innerPadding ->
         Box(
@@ -235,6 +244,10 @@ fun PatientScreenContainer(
     }
 }
 
+/**
+ * Pantalla de estado vacío cuando aún no hay información médica registrada para el paciente del grupo.
+ * Ofrece la opción de registrar la ficha si el usuario tiene rol con permisos.
+ */
 @Composable
 fun PatientEmptyState(userRole: Role, onRegisterClick: () -> Unit) {
     Card(
@@ -281,6 +294,10 @@ fun PatientEmptyState(userRole: Role, onRegisterClick: () -> Unit) {
     }
 }
 
+/**
+ * Pantalla de formulario para registrar o modificar la ficha médica del paciente.
+ * Permite editar datos personales, tipo de sangre, contactos de emergencia, alergias, antecedentes y seguro médico.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PatientFormScreen(
@@ -608,6 +625,10 @@ fun PatientFormSection(title: String, content: @Composable ColumnScope.() -> Uni
     }
 }
 
+/**
+ * Pantalla de visualización/lectura completa de la ficha médica del paciente.
+ * Presenta secciones detalladas de información personal, médica, alergias, contactos de emergencia y ediciones rápidas.
+ */
 @Composable
 fun PatientDetailsScreen(
     patient: Patient,

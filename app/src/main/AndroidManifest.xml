@@ -4,6 +4,10 @@
 
     <!-- Permiso para enviar notificaciones locales en Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Permiso para vibración en alertas SOS -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Permiso para desplegar notificaciones a pantalla completa en Android 10+ (API 29+) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:allowBackup="true"

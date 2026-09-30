@@ -4,8 +4,10 @@ import android.os.Bundle
 import android.os.Build
 import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -38,16 +40,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -64,18 +67,23 @@ import com.example.cuidafamily.ui.calendar.CalendarViewModel
 import com.example.cuidafamily.ui.group.GrupoFamiliarScreen
 import com.example.cuidafamily.ui.patient.PatientScreenContainer
 import com.example.cuidafamily.ui.patient.PatientViewModel
+import com.example.cuidafamily.ui.sos.SosConfirmationDialog
+import com.example.cuidafamily.ui.sos.SosFloatingButton
+import com.example.cuidafamily.ui.sos.SosIncomingAlertOverlayDialog
+import com.example.cuidafamily.ui.sos.SosViewModel
 import com.example.cuidafamily.ui.theme.CuidaFamilyTheme
 import com.example.cuidafamily.ui.theme.LavandaPrimary
-import com.example.cuidafamily.ui.theme.LavandaPrimaryLight
 import com.example.cuidafamily.ui.util.AppBackgroundDecorated
 import com.example.cuidafamily.ui.util.GradientButton
 import com.example.cuidafamily.ui.util.UserAvatar
+import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
     
     private val authViewModel: AuthViewModel by viewModels()
     private val patientViewModel: PatientViewModel by viewModels()
     private val calendarViewModel: CalendarViewModel by viewModels()
+    private val sosViewModel: SosViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +95,32 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CuidaFamilyTheme {
+                val context = LocalContext.current
+                val authState by authViewModel.uiState.collectAsState()
+                val sosState by sosViewModel.uiState.collectAsState()
+                val currentUser = FirebaseAuth.getInstance().currentUser
+
+                // Solicitud de permiso de notificaciones en Android 13+ (API 33+)
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { _ -> }
+
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+
+                // Escucha en tiempo real de las alertas SOS activas tan pronto el usuario ingresa a un grupo
+                LaunchedEffect(authState.familyGroupId, currentUser?.uid, authState.nombre) {
+                    val groupId = authState.familyGroupId
+                    val userId = currentUser?.uid ?: ""
+                    val userName = authState.nombre
+                    if (!groupId.isNullOrBlank() && userId.isNotBlank()) {
+                        sosViewModel.iniciarEscucha(groupId, userId, userName, context)
+                    }
+                }
+
                 val navController = rememberNavController()
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -108,7 +142,6 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             composable("splash") {
-                                val authState by authViewModel.uiState.collectAsState()
                                 SplashScreen(
                                     viewModel = authViewModel,
                                     onNavigateNext = {
@@ -132,13 +165,13 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("home") {
-                                val authState by authViewModel.uiState.collectAsState()
                                 WelcomeScreen(
                                     userName = authState.nombre,
                                     roleName = authState.selectedRole?.name ?: "No asignado",
                                     onNavigateToFicha = { navController.navigate("ficha") },
                                     onNavigateToCalendario = { navController.navigate("calendario") },
                                     onNavigateToGrupo = { navController.navigate("grupo_familiar") },
+                                    onSosClick = { sosViewModel.solicitarConfirmacionSos() },
                                     onLogout = {
                                         authViewModel.cerrarSesion()
                                         navController.navigate("auth_flow") {
@@ -149,7 +182,6 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("ficha") {
-                                val authState by authViewModel.uiState.collectAsState()
                                 val familyGroupId = authState.familyGroupId
                                 val userRole = authState.selectedRole ?: Role.COLABORADOR
                                 val userName = authState.nombre
@@ -160,7 +192,8 @@ class MainActivity : ComponentActivity() {
                                         familyGroupId = familyGroupId,
                                         userRole = userRole,
                                         userName = userName,
-                                        onBackClick = { navController.popBackStack() }
+                                        onBackClick = { navController.popBackStack() },
+                                        onSosClick = { sosViewModel.solicitarConfirmacionSos() }
                                     )
                                 } else {
                                     ErrorGroupScreen { navController.popBackStack() }
@@ -168,7 +201,6 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("calendario") {
-                                val authState by authViewModel.uiState.collectAsState()
                                 val familyGroupId = authState.familyGroupId
                                 val userRole = authState.selectedRole ?: Role.ADMINISTRADOR_FAMILIAR
                                 val userName = authState.nombre
@@ -179,7 +211,8 @@ class MainActivity : ComponentActivity() {
                                         familyGroupId = familyGroupId,
                                         userRole = userRole,
                                         userName = userName,
-                                        onBackClick = { navController.popBackStack() }
+                                        onBackClick = { navController.popBackStack() },
+                                        onSosClick = { sosViewModel.solicitarConfirmacionSos() }
                                     )
                                 } else {
                                     ErrorGroupScreen { navController.popBackStack() }
@@ -187,7 +220,6 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("grupo_familiar") {
-                                val authState by authViewModel.uiState.collectAsState()
                                 val familyGroupId = authState.familyGroupId
                                 val userRole = authState.selectedRole ?: Role.COLABORADOR
                                 val userName = authState.nombre
@@ -204,6 +236,33 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+
+                        // Diálogo Global de Confirmación de disparo SOS
+                        if (sosState.showConfirmDialog) {
+                            val familyGroupId = authState.familyGroupId ?: ""
+                            val userId = currentUser?.uid ?: ""
+                            val userName = authState.nombre
+                            SosConfirmationDialog(
+                                onConfirm = {
+                                    sosViewModel.dispararAlerta(familyGroupId, userId, userName)
+                                },
+                                onDismiss = {
+                                    sosViewModel.cancelarConfirmacionSos()
+                                }
+                            )
+                        }
+
+                        // Diálogo Global de Pantalla Completa para Alerta Entrante
+                        sosState.incomingAlert?.let { incomingAlert ->
+                            val userId = currentUser?.uid ?: ""
+                            val userName = authState.nombre
+                            SosIncomingAlertOverlayDialog(
+                                alert = incomingAlert,
+                                onMarkAttended = {
+                                    sosViewModel.marcarComoAtendida(incomingAlert, userId, userName)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -211,6 +270,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Pantalla de error desplegada cuando no se encuentra un grupo familiar asociado al usuario activo.
+ */
 @Composable
 fun ErrorGroupScreen(onBackClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -254,6 +316,10 @@ fun AppScaffoldWrapper(
     }
 }
 
+/**
+ * Pantalla de bienvenida e inicio/menú principal.
+ * Permite al usuario acceder a la Ficha Médica, Calendario/Agenda, Grupo Familiar o cerrar sesión.
+ */
 @Composable
 fun WelcomeScreen(
     userName: String,
@@ -261,6 +327,7 @@ fun WelcomeScreen(
     onNavigateToFicha: () -> Unit,
     onNavigateToCalendario: () -> Unit,
     onNavigateToGrupo: () -> Unit,
+    onSosClick: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     AppBackgroundDecorated {
@@ -331,6 +398,14 @@ fun WelcomeScreen(
                     }
                 }
             }
+
+            // Botón SOS Flotante permanente en la pantalla principal
+            SosFloatingButton(
+                onClick = onSosClick,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp)
+            )
         }
     }
 }

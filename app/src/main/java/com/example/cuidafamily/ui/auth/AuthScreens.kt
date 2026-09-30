@@ -123,6 +123,10 @@ enum class AuthScreenDestination {
     CONFIGURACION_GRUPO
 }
 
+/**
+ * Contenedor principal del flujo de autenticación y registro.
+ * Maneja el estado de navegación entre Login, Registro, Selección de Rol, Subtipo de Rol y Configuración de Grupo.
+ */
 @Composable
 fun AuthFlowContainer(
     viewModel: AuthViewModel,
@@ -264,6 +268,10 @@ fun AuthFlowContainer(
     }
 }
 
+/**
+ * Pantalla de inicio de sesión (Login).
+ * Permite al usuario autenticarse mediante su correo electrónico y contraseña registrados en Firebase.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
@@ -350,6 +358,10 @@ fun LoginScreen(
     }
 }
 
+/**
+ * Pantalla de registro de usuario (Paso 1 del registro).
+ * Captura datos personales como nombre completo, correo electrónico y contraseña.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegistroScreen(
@@ -499,6 +511,10 @@ fun RegistroScreen(
     }
 }
 
+/**
+ * Pantalla de selección de rol (Paso 2 del registro).
+ * Permite elegir el rol de usuario: Administrador Familiar, Colaborador o Cuidador Externo.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SeleccionRolScreen(
@@ -597,6 +613,10 @@ fun SeleccionRolScreen(
     }
 }
 
+/**
+ * Pantalla de especificación de subtipo de rol o parentesco (Paso 3 del registro).
+ * Define la relación o perfil específico según el rol seleccionado.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubtipoRolScreen(
@@ -757,6 +777,10 @@ fun RolTarjetaAnimada(
     }
 }
 
+/**
+ * Pantalla para crear un nuevo grupo o unirse a uno existente (Paso 4 del registro).
+ * Permite ingresar el nombre del nuevo grupo familiar o el código de invitación de 6 dígitos.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfiguracionGrupoScreen(

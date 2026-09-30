@@ -117,7 +117,12 @@ import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import com.example.cuidafamily.ui.sos.SosFloatingButton
 
+/**
+ * Pantalla principal del Calendario y Agenda Familiar.
+ * Muestra la vista mensual/diaria de eventos, citas médicas, actividades y medicamentos de la familia.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreenContainer(
@@ -125,7 +130,8 @@ fun CalendarScreenContainer(
     familyGroupId: String,
     userRole: Role,
     userName: String,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onSosClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -185,21 +191,27 @@ fun CalendarScreenContainer(
             )
         },
         floatingActionButton = {
-            if (uiState.canWrite) {
-                FloatingActionButton(
-                    onClick = { showCreateDialog = true },
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp),
-                    interactionSource = fabInteractionSource,
-                    modifier = Modifier
-                        .scale(fabScale)
-                        .size(56.dp)
-                        .background(fabGradient, CircleShape)
-                ) {
-                    Text("+", fontSize = 28.sp, fontWeight = FontWeight.Normal)
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (uiState.canWrite) {
+                    FloatingActionButton(
+                        onClick = { showCreateDialog = true },
+                        containerColor = Color.Transparent,
+                        contentColor = Color.White,
+                        shape = CircleShape,
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp),
+                        interactionSource = fabInteractionSource,
+                        modifier = Modifier
+                            .scale(fabScale)
+                            .size(56.dp)
+                            .background(fabGradient, CircleShape)
+                    ) {
+                        Text("+", fontSize = 28.sp, fontWeight = FontWeight.Normal)
+                    }
                 }
+                SosFloatingButton(onClick = onSosClick)
             }
         }
     ) { innerPadding ->
@@ -656,6 +668,10 @@ private fun formatearFechaLegible(fechaIso: String): String {
     }
 }
 
+/**
+ * Formulario en diálogo para crear o editar un evento en la agenda del calendario.
+ * Permite definir título, fecha, tipo de evento, horarios de inicio y fin, e indicaciones adicionales.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FormularioCrearEventoDialog(

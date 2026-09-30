@@ -37,6 +37,10 @@ import com.example.cuidafamily.ui.theme.TextoSecundario
 import com.example.cuidafamily.ui.util.AppBackgroundDecorated
 import kotlinx.coroutines.delay
 
+/**
+ * Pantalla de bienvenida / carga inicial (Splash Screen).
+ * Verifica si existe una sesión activa y anima el logo antes de redirigir al flujo de autenticación o al menú principal.
+ */
 @Composable
 fun SplashScreen(
     viewModel: AuthViewModel,

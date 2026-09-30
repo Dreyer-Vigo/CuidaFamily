@@ -64,6 +64,10 @@ import com.example.cuidafamily.ui.util.UserAvatar
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+/**
+ * Pantalla de información y administración del Grupo Familiar.
+ * Muestra el código de invitación del grupo (para administradores) y la lista de miembros colaboradores con sus roles.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GrupoFamiliarScreen(
