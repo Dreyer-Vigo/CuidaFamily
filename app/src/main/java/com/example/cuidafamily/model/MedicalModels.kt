@@ -6,26 +6,17 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/**
- * Niveles de severidad aplicables a alergias o condiciones del paciente.
- */
 enum class Severidad {
     LEVE,
     MODERADA,
     SEVERA
 }
 
-/**
- * Representa un registro histórico del peso del paciente.
- */
 data class WeightRecord(
     val fecha: String = "",
     val valorKg: Double = 0.0
 )
 
-/**
- * Alergia o intolerancia diagnosticada en el paciente.
- */
 data class Allergy(
     val id: String = "",
     val nombreAlergeno: String = "",
@@ -33,9 +24,6 @@ data class Allergy(
     val descripcionReaccion: String = ""
 )
 
-/**
- * Representa al ser querido o persona dependiente que recibe los cuidados médicos y asistencia familiar.
- */
 data class Patient(
     val id: String = "",
     val nombre: String = "",
@@ -44,28 +32,18 @@ data class Patient(
     val fotoUrl: String? = null,
     val grupoSanguineo: String = "O+",
     val pesoActual: Double = 0.0,
-    
-    // Datos Clínicos
     val historiaClinica: String = "",
     val seguroSalud: String = "",
     val medicoTratante: String = "",
-    
-    // Contacto de Emergencia
     val contactoEmergenciaNombre: String = "",
     val contactoEmergenciaTelefono: String = "",
     val contactoEmergenciaRelacion: String = "",
-    
-    // Secciones de texto libre
     val enfermedadesCronicas: String = "",
     val medicamentosActuales: String = "",
     val informacionAdicional: String? = null,
-    
     val familyGroupId: String = ""
 )
 
-/**
- * Función de extensión para calcular la edad exacta del paciente en años.
- */
 fun Patient.calcularEdad(): Int {
     if (this.fechaNacimiento.isBlank()) return 0
     

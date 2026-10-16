@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,10 +36,6 @@ import com.example.cuidafamily.ui.theme.TextoSecundario
 import com.example.cuidafamily.ui.util.AppBackgroundDecorated
 import kotlinx.coroutines.delay
 
-/**
- * Pantalla de bienvenida / carga inicial (Splash Screen).
- * Verifica si existe una sesión activa y anima el logo antes de redirigir al flujo de autenticación o al menú principal.
- */
 @Composable
 fun SplashScreen(
     viewModel: AuthViewModel,
@@ -67,7 +62,6 @@ fun SplashScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Logo Container
                 Box(
                     modifier = Modifier
                         .size(100.dp)
@@ -93,7 +87,6 @@ fun SplashScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // App Name with Gradient
                 val textGradient = Brush.linearGradient(
                     colors = listOf(GradientStarStart, GradientStarEnd)
                 )

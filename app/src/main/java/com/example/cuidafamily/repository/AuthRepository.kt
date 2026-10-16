@@ -21,33 +21,21 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Clase sellada para el manejo de estados de éxito o error en las operaciones.
- */
 sealed class Result<out T> {
     data class Success<out T>(val data: T) : Result<T>()
     data class Error(val exception: Exception) : Result<Nothing>()
 }
 
-/**
- * Envoltorio para un miembro del grupo con información del perfil de usuario.
- */
 data class GroupMemberInfo(
     val member: GroupMember,
     val userName: String
 )
 
-/**
- * Repositorio de autenticación y gestión de grupos familiares usando Firebase (Auth y Firestore).
- */
 object AuthRepository {
 
     private val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore get() = FirebaseFirestore.getInstance()
 
-    /**
-     * Registra un nuevo usuario en Firebase Auth y guarda su perfil inicial en Firestore.
-     */
     suspend fun registrar(nombre: String, email: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
         try {
             val authResult = auth.createUserWithEmailAndPassword(email, contrasenia).await()
@@ -68,9 +56,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Realiza el inicio de sesión y recupera el perfil completo del usuario.
-     */
     suspend fun login(email: String, contrasenia: String): Result<User> = withContext(Dispatchers.IO) {
         try {
             val authResult = auth.signInWithEmailAndPassword(email, contrasenia).await()
@@ -96,9 +81,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Crea un nuevo grupo familiar y actualiza el perfil del usuario con el ID del grupo y el rol de Admin.
-     */
     suspend fun crearFamilyGroup(nombre: String, adminUserId: String, subtipo: String): Result<FamilyGroup> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida, vuelve a iniciar sesión."))
@@ -129,7 +111,6 @@ object AuthRepository {
             batch.set(groupRef, nuevoGrupo)
             batch.set(groupRef.collection("members").document(adminUserId), miembroAdmin)
             
-            // Actualización del perfil del usuario
             batch.update(userRef, "familyGroupId", groupId)
             batch.update(userRef, "role", Role.ADMINISTRADOR_FAMILIAR.name)
             batch.update(userRef, "subtipo", subtipo)
@@ -143,9 +124,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Une a un usuario a un grupo existente y actualiza su perfil con el ID del grupo y el rol elegido.
-     */
     suspend fun unirseAGrupo(codigoInvitacion: String, userId: String, rol: Role, subtipo: String): Result<FamilyGroup> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -183,7 +161,6 @@ object AuthRepository {
             val userRef = db.collection("users").document(userId)
 
             batch.set(memberRef, nuevoMiembro)
-            // Actualización del perfil del usuario
             batch.update(userRef, "familyGroupId", grupo.id)
             batch.update(userRef, "role", rol.name)
             batch.update(userRef, "subtipo", subtipo)
@@ -197,9 +174,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Obtiene los miembros de un grupo familiar.
-     */
     suspend fun obtenerMiembrosDelGrupo(familyGroupId: String): Result<List<GroupMemberInfo>> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -225,9 +199,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Obtiene los detalles de un grupo por ID.
-     */
     suspend fun obtenerGrupoPorId(familyGroupId: String): FamilyGroup? = withContext(Dispatchers.IO) {
         try {
             val doc = db.collection("familyGroups").document(familyGroupId).get().await()
@@ -239,9 +210,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Busca el rol y grupo al que pertenece un usuario.
-     */
     suspend fun obtenerInfoMiembroParaUsuario(userId: String): GroupMember? = withContext(Dispatchers.IO) {
         if (auth.currentUser == null) return@withContext null
 
@@ -260,9 +228,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Busca el ID del grupo al que pertenece un miembro.
-     */
     suspend fun obtenerGroupIdDeMiembro(userId: String): String? = withContext(Dispatchers.IO) {
         if (auth.currentUser == null) return@withContext null
 
@@ -273,7 +238,6 @@ object AuthRepository {
                 .get()
                 .await()
             
-            // members doc -> members collection -> group doc
             groupsSnapshot.documents.firstOrNull()?.reference?.parent?.parent?.id
         } catch (e: Exception) {
             handleFirebaseException("obtenerGroupIdDeMiembro", e)
@@ -281,9 +245,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Cierra la sesión activa.
-     */
     fun cerrarSesion() {
         try {
             auth.signOut()
@@ -292,9 +253,6 @@ object AuthRepository {
         }
     }
 
-    /**
-     * Genera un código aleatorio de 6 dígitos único.
-     */
     private suspend fun generarCodigoInvitacionUnico(): String {
         var codigo: String
         var existe: Boolean
@@ -316,9 +274,6 @@ object AuthRepository {
         return sdf.format(Date())
     }
 
-    /**
-     * Traduce las excepciones de Firebase Auth.
-     */
     private fun traducirErrorAuth(e: Exception): Exception {
         val mensaje = when (e) {
             is FirebaseAuthUserCollisionException -> "Ya existe una cuenta con este correo. Intenta iniciar sesión o usa otro correo."

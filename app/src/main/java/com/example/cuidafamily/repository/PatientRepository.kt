@@ -6,8 +6,10 @@ import com.example.cuidafamily.model.Patient
 import com.example.cuidafamily.model.WeightRecord
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -15,18 +17,11 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-/**
- * Repositorio médico para la gestión de Pacientes, Alergias e Historial de Peso en Firestore.
- * Estructura: familyGroups/{groupId}/patients/{patientId}
- */
 object PatientRepository {
 
     private val db get() = FirebaseFirestore.getInstance()
     private val auth get() = FirebaseAuth.getInstance()
 
-    /**
-     * Obtiene el paciente asignado al grupo familiar con actualizaciones en tiempo real.
-     */
     fun obtenerPatientRealTime(familyGroupId: String): Flow<Patient?> = callbackFlow {
         val user = auth.currentUser
         if (user == null) {
@@ -53,21 +48,28 @@ object PatientRepository {
                     return@addSnapshotListener
                 }
                 
-                val patient = try {
-                    snapshot?.documents?.firstOrNull()?.toObject(Patient::class.java)
-                } catch (e: Exception) {
-                    Log.e("PatientRepository", "Error al deserializar Patient en tiempo real", e)
-                    null
+                val doc = snapshot?.documents?.firstOrNull()
+                if (doc == null) {
+                    trySend(null)
+                    return@addSnapshotListener
                 }
-                trySend(patient)
+
+                val basicPatient = parseBasicPatient(doc)
+
+                doc.reference.collection("datosSensibles").document("info")
+                    .get()
+                    .addOnSuccessListener { sensiblesDoc ->
+                        val fullPatient = mergeSensibles(basicPatient, sensiblesDoc)
+                        trySend(fullPatient)
+                    }
+                    .addOnFailureListener {
+                        trySend(basicPatient)
+                    }
             }
         
         awaitClose { listener.remove() }
     }
 
-    /**
-     * Obtiene el paciente una única vez.
-     */
     suspend fun obtenerPatientDelGrupo(familyGroupId: String): Result<Patient?> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida, vuelve a iniciar sesión."))
@@ -80,22 +82,23 @@ object PatientRepository {
                 .get()
                 .await()
             
-            val patient = try {
-                query.documents.firstOrNull()?.toObject(Patient::class.java)
+            val doc = query.documents.firstOrNull() ?: return@withContext Result.Success(null)
+            val basicPatient = parseBasicPatient(doc)
+
+            val fullPatient = try {
+                val sensiblesDoc = doc.reference.collection("datosSensibles").document("info").get().await()
+                mergeSensibles(basicPatient, sensiblesDoc)
             } catch (e: Exception) {
-                Log.e("PatientRepository", "Error deserializing Patient for group: $familyGroupId", e)
-                null
+                basicPatient
             }
-            Result.Success(patient)
+
+            Result.Success(fullPatient)
         } catch (e: Exception) {
             handleFirebaseException("obtenerPatientDelGrupo", e)
             Result.Error(Exception("No se pudo recuperar la información del paciente."))
         }
     }
 
-    /**
-     * Guarda o actualiza la ficha del paciente dentro de su grupo familiar.
-     */
     suspend fun crearOEditarPatient(patient: Patient): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida, vuelve a iniciar sesión."))
@@ -108,10 +111,37 @@ object PatientRepository {
         Log.d("PatientRepository", "Guardando patient en grupo: $groupId")
 
         try {
-            db.collection("familyGroups").document(groupId)
+            val patientRef = db.collection("familyGroups").document(groupId)
                 .collection("patients").document(patient.id)
-                .set(patient)
-                .await()
+
+            val basicMap = mapOf(
+                "id" to patient.id,
+                "nombre" to patient.nombre,
+                "fechaNacimiento" to patient.fechaNacimiento,
+                "fotoUrl" to patient.fotoUrl,
+                "grupoSanguineo" to patient.grupoSanguineo,
+                "pesoActual" to patient.pesoActual,
+                "familyGroupId" to groupId
+            )
+
+            val sensiblesMap = mapOf(
+                "dni" to patient.dni,
+                "historiaClinica" to patient.historiaClinica,
+                "seguroSalud" to patient.seguroSalud,
+                "medicoTratante" to patient.medicoTratante,
+                "contactoEmergenciaNombre" to patient.contactoEmergenciaNombre,
+                "contactoEmergenciaTelefono" to patient.contactoEmergenciaTelefono,
+                "contactoEmergenciaRelacion" to patient.contactoEmergenciaRelacion,
+                "enfermedadesCronicas" to patient.enfermedadesCronicas,
+                "medicamentosActuales" to patient.medicamentosActuales,
+                "informacionAdicional" to patient.informacionAdicional
+            )
+
+            val batch = db.batch()
+            batch.set(patientRef, basicMap, SetOptions.merge())
+            batch.set(patientRef.collection("datosSensibles").document("info"), sensiblesMap, SetOptions.merge())
+            batch.commit().await()
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("crearOEditarPatient", e)
@@ -119,9 +149,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Elimina el paciente y sus datos asociados.
-     */
     suspend fun eliminarPatient(familyGroupId: String, patientId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -138,9 +165,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Agrega o actualiza una alergia en la subcolección del paciente.
-     */
     suspend fun agregarAlergia(familyGroupId: String, patientId: String, allergy: Allergy): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -158,9 +182,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Elimina una alergia específica.
-     */
     suspend fun eliminarAlergia(familyGroupId: String, patientId: String, allergyId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -178,9 +199,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Registra un nuevo peso y actualiza el campo pesoActual en el paciente usando una transacción.
-     */
     suspend fun agregarRegistroPeso(familyGroupId: String, patientId: String, weightRecord: WeightRecord): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -201,9 +219,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Recupera el historial cronológico de peso desde Firestore.
-     */
     suspend fun obtenerHistorialPeso(familyGroupId: String, patientId: String): Result<List<WeightRecord>> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -229,9 +244,6 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Obtiene la lista de alergias del paciente desde Firestore.
-     */
     suspend fun obtenerAlergiasDelPatient(familyGroupId: String, patientId: String): Result<List<Allergy>> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -256,23 +268,61 @@ object PatientRepository {
         }
     }
 
-    /**
-     * Actualiza campos específicos del paciente.
-     */
     suspend fun actualizarCamposPatient(familyGroupId: String, patientId: String, cambios: Map<String, Any>): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
 
         try {
-            db.collection("familyGroups").document(familyGroupId)
+            val basicKeys = setOf("nombre", "fechaNacimiento", "grupoSanguineo", "pesoActual", "fotoUrl", "familyGroupId")
+            val basicMap = cambios.filterKeys { it in basicKeys }
+            val sensiblesMap = cambios.filterKeys { it !in basicKeys }
+
+            val patientRef = db.collection("familyGroups").document(familyGroupId)
                 .collection("patients").document(patientId)
-                .update(cambios)
-                .await()
+
+            val batch = db.batch()
+            if (basicMap.isNotEmpty()) {
+                batch.update(patientRef, basicMap)
+            }
+            if (sensiblesMap.isNotEmpty()) {
+                val sensiblesRef = patientRef.collection("datosSensibles").document("info")
+                batch.set(sensiblesRef, sensiblesMap, SetOptions.merge())
+            }
+            batch.commit().await()
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("actualizarCamposPatient", e)
             Result.Error(Exception("Error al actualizar la ficha."))
         }
+    }
+
+    private fun parseBasicPatient(doc: DocumentSnapshot): Patient {
+        return Patient(
+            id = doc.id,
+            nombre = doc.getString("nombre") ?: "",
+            fechaNacimiento = doc.getString("fechaNacimiento") ?: "",
+            fotoUrl = doc.getString("fotoUrl"),
+            grupoSanguineo = doc.getString("grupoSanguineo") ?: "O+",
+            pesoActual = doc.getDouble("pesoActual") ?: 0.0,
+            familyGroupId = doc.getString("familyGroupId") ?: ""
+        )
+    }
+
+    private fun mergeSensibles(basic: Patient, sensiblesDoc: DocumentSnapshot?): Patient {
+        if (sensiblesDoc == null || !sensiblesDoc.exists()) return basic
+        return basic.copy(
+            dni = sensiblesDoc.getString("dni") ?: "",
+            historiaClinica = sensiblesDoc.getString("historiaClinica") ?: "",
+            seguroSalud = sensiblesDoc.getString("seguroSalud") ?: "",
+            medicoTratante = sensiblesDoc.getString("medicoTratante") ?: "",
+            contactoEmergenciaNombre = sensiblesDoc.getString("contactoEmergenciaNombre") ?: "",
+            contactoEmergenciaTelefono = sensiblesDoc.getString("contactoEmergenciaTelefono") ?: "",
+            contactoEmergenciaRelacion = sensiblesDoc.getString("contactoEmergenciaRelacion") ?: "",
+            enfermedadesCronicas = sensiblesDoc.getString("enfermedadesCronicas") ?: "",
+            medicamentosActuales = sensiblesDoc.getString("medicamentosActuales") ?: "",
+            informacionAdicional = sensiblesDoc.getString("informacionAdicional")
+        )
     }
 
     private fun handleFirebaseException(method: String, e: Exception) {

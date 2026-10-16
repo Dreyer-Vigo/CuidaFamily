@@ -113,6 +113,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.FolderShared
 import com.example.cuidafamily.ui.sos.SosFloatingButton
 
 /**
@@ -127,6 +129,7 @@ fun PatientScreenContainer(
     userRole: Role,
     userName: String,
     onBackClick: () -> Unit,
+    onNavigateToDocumentos: () -> Unit = {},
     onSosClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -219,6 +222,7 @@ fun PatientScreenContainer(
                                 patient = state.patient,
                                 canEdit = state.canEdit,
                                 onEditClick = { isEditing = true },
+                                onNavigateToDocumentos = onNavigateToDocumentos,
                                 viewModel = viewModel,
                                 familyGroupId = familyGroupId,
                                 userRole = userRole
@@ -634,6 +638,7 @@ fun PatientDetailsScreen(
     patient: Patient,
     canEdit: Boolean,
     onEditClick: () -> Unit,
+    onNavigateToDocumentos: () -> Unit = {},
     viewModel: PatientViewModel,
     familyGroupId: String,
     userRole: Role
@@ -712,13 +717,19 @@ fun PatientDetailsScreen(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(patient.nombre, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
-                    Text("Edad: ${patient.calcularEdad()} años  •  DNI: ${patient.dni.ifBlank { "N/A" }}", fontSize = 14.sp, color = TextoSecundario)
+                    val edadTexto = if (patient.fechaNacimiento.isNotBlank()) "Edad: ${patient.calcularEdad()} años" else "Edad no registrada"
+                    val subtitleTexto = if (userRole != Role.CUIDADOR_EXTERNO) {
+                        "$edadTexto  •  DNI: ${patient.dni.ifBlank { "N/A" }}"
+                    } else {
+                        edadTexto
+                    }
+                    Text(subtitleTexto, fontSize = 14.sp, color = TextoSecundario)
                 }
                 if (esAdmin) Icon(Icons.Default.Edit, null, tint = LavandaPrimary.copy(alpha = 0.3f), modifier = Modifier.align(Alignment.TopEnd).size(18.dp))
             }
         }
 
-        // 2. Sangre y Peso
+        // 2. Sangre y Peso (Visibles para todos los roles, incluido CUIDADOR_EXTERNO)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = RojoAlertaFondo),
@@ -755,61 +766,113 @@ fun PatientDetailsScreen(
             }
         }
 
-
-        PatientInfoSectionCard(
-            title = "Datos Clínicos",
-            icon = Icons.Default.MedicalInformation,
-            color = LavandaPrimary,
-            clickable = esAdmin,
-            onClick = { showEditClinical = true }
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Historia Clínica: ${patient.historiaClinica.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
-                Text("Seguro de Salud: ${patient.seguroSalud.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
-                Text("Médico Tratante: ${patient.medicoTratante.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
-            }
-        }
-
-
-        PatientInfoSectionCard(
-            title = "Contacto de Emergencia",
-            icon = Icons.Default.ContactEmergency,
-            color = RojoAlerta,
-            clickable = esAdmin,
-            onClick = { showEditEmergency = true }
-        ) {
-            if (patient.contactoEmergenciaNombre.isBlank()) {
-                Text("Sin contacto registrado", color = TextoSecundario, fontSize = 13.sp)
-            } else {
-                Column {
-                    Text(patient.contactoEmergenciaNombre, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("Tel: ${patient.contactoEmergenciaTelefono} (${patient.contactoEmergenciaRelacion})", fontSize = 14.sp)
+        // Secciones restringidas según Requerimiento 11 (Ocultas para CUIDADOR_EXTERNO)
+        if (userRole != Role.CUIDADOR_EXTERNO) {
+            // Acceso a Documentos Médicos Digitalizados
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToDocumentos() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(LavandaPrimaryLight, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderShared,
+                            contentDescription = null,
+                            tint = LavandaPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Documentos Médicos",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Ver y subir recetas, exámenes, radiografías",
+                            fontSize = 12.sp,
+                            color = TextoSecundario
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = LavandaPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
+
+            PatientInfoSectionCard(
+                title = "Datos Clínicos",
+                icon = Icons.Default.MedicalInformation,
+                color = LavandaPrimary,
+                clickable = esAdmin,
+                onClick = { showEditClinical = true }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Historia Clínica: ${patient.historiaClinica.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
+                    Text("Seguro de Salud: ${patient.seguroSalud.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
+                    Text("Médico Tratante: ${patient.medicoTratante.ifBlank { "Sin registrar" }}", fontSize = 14.sp)
+                }
+            }
+
+            PatientInfoSectionCard(
+                title = "Contacto de Emergencia",
+                icon = Icons.Default.ContactEmergency,
+                color = RojoAlerta,
+                clickable = esAdmin,
+                onClick = { showEditEmergency = true }
+            ) {
+                if (patient.contactoEmergenciaNombre.isBlank()) {
+                    Text("Sin contacto registrado", color = TextoSecundario, fontSize = 13.sp)
+                } else {
+                    Column {
+                        Text(patient.contactoEmergenciaNombre, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Tel: ${patient.contactoEmergenciaTelefono} (${patient.contactoEmergenciaRelacion})", fontSize = 14.sp)
+                    }
+                }
+            }
+
+            PatientInfoSectionCard(
+                title = "Enfermedades Crónicas",
+                icon = Icons.Default.HistoryEdu,
+                color = AmbarAlerta,
+                clickable = esAdmin,
+                onClick = { showEditChronic = true }
+            ) {
+                Text(patient.enfermedadesCronicas.ifBlank { "Ninguna registrada." }, fontSize = 14.sp, lineHeight = 20.sp)
+            }
+
+            PatientInfoSectionCard(
+                title = "Medicamentos Actuales",
+                icon = Icons.Default.Medication,
+                color = Color(0xFF4A90E2),
+                clickable = esAdmin,
+                onClick = { showEditMeds = true }
+            ) {
+                Text(patient.medicamentosActuales.ifBlank { "Sin medicación reportada." }, fontSize = 14.sp, lineHeight = 20.sp)
+            }
         }
 
-
-        PatientInfoSectionCard(
-            title = "Enfermedades Crónicas",
-            icon = Icons.Default.HistoryEdu,
-            color = AmbarAlerta,
-            clickable = esAdmin,
-            onClick = { showEditChronic = true }
-        ) {
-            Text(patient.enfermedadesCronicas.ifBlank { "Ninguna registrada." }, fontSize = 14.sp, lineHeight = 20.sp)
-        }
-
-
-        PatientInfoSectionCard(
-            title = "Medicamentos Actuales",
-            icon = Icons.Default.Medication,
-            color = Color(0xFF4A90E2),
-            clickable = esAdmin,
-            onClick = { showEditMeds = true }
-        ) {
-            Text(patient.medicamentosActuales.ifBlank { "Sin medicación reportada." }, fontSize = 14.sp, lineHeight = 20.sp)
-        }
-
+        // Sección de Alergias Conocidas (Visibles para todos los roles)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Shield, null, tint = LavandaPrimary, modifier = Modifier.size(22.dp))
             Spacer(modifier = Modifier.width(8.dp))
@@ -840,7 +903,7 @@ fun PatientDetailsScreen(
             }
         }
 
-        if (patient.informacionAdicional != null) {
+        if (userRole != Role.CUIDADOR_EXTERNO && patient.informacionAdicional != null) {
             Text("Notas Adicionales", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.White),

@@ -1,5 +1,6 @@
 package com.example.cuidafamily.ui.patient
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cuidafamily.model.Allergy
@@ -11,14 +12,10 @@ import com.example.cuidafamily.repository.Result
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-/**
- * Representa los diferentes estados de la interfaz de usuario para la ficha del paciente.
- */
 sealed class PatientUiState {
     object Empty : PatientUiState()
     object Loading : PatientUiState()
@@ -35,14 +32,19 @@ class PatientViewModel : ViewModel() {
     private var currentUserRole: Role? = null
     private var loadPatientJob: Job? = null
 
-    /**
-     * Inicializa la carga del paciente con sincronización en tiempo real.
-     */
-    fun loadPatient(familyGroupId: String, userRole: Role) {
+    fun iniciar(userId: String, familyGroupId: String, userRole: Role = Role.CUIDADOR_EXTERNO) {
+        if (familyGroupId.isBlank()) return
+
+        if (familyGroupId == currentFamilyGroupId && userRole == currentUserRole && loadPatientJob?.isActive == true) {
+            return
+        }
+
+        Log.d("Sesion", "Reiniciando listeners para uid=$userId grupo=$familyGroupId en PatientViewModel")
+
+        limpiar()
         currentFamilyGroupId = familyGroupId
         currentUserRole = userRole
         
-        loadPatientJob?.cancel()
         loadPatientJob = viewModelScope.launch {
             _uiState.value = PatientUiState.Loading
             
@@ -59,9 +61,19 @@ class PatientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Crea o edita la información completa del paciente.
-     */
+    fun loadPatient(familyGroupId: String, userRole: Role) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+        iniciar(uid, familyGroupId, userRole)
+    }
+
+    fun limpiar() {
+        loadPatientJob?.cancel()
+        loadPatientJob = null
+        currentFamilyGroupId = null
+        currentUserRole = null
+        _uiState.value = PatientUiState.Loading
+    }
+
     fun registrarOEditarPatient(
         nombre: String,
         fechaNacimiento: String,
@@ -86,7 +98,6 @@ class PatientViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = PatientUiState.Loading
             try {
-                // Obtenemos el paciente actual para conservar el ID si existe
                 val existingPatientResult = PatientRepository.obtenerPatientDelGrupo(groupId)
                 val patientId = if (existingPatientResult is Result.Success) {
                     existingPatientResult.data?.id ?: UUID.randomUUID().toString()
@@ -116,7 +127,6 @@ class PatientViewModel : ViewModel() {
 
                 val saveResult = PatientRepository.crearOEditarPatient(newPatient)
                 if (saveResult is Result.Success) {
-                    // Si hay alergias iniciales (caso ALTA), las guardamos una a una
                     alergiasIniciales.forEach { allergy ->
                         PatientRepository.agregarAlergia(groupId, patientId, allergy)
                     }
@@ -129,9 +139,6 @@ class PatientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Agrega una alergia al perfil del paciente.
-     */
     fun agregarAlergia(allergy: Allergy) {
         val state = _uiState.value
         val groupId = currentFamilyGroupId ?: return
@@ -145,9 +152,6 @@ class PatientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Elimina una alergia del perfil del paciente.
-     */
     fun eliminarAlergia(allergyId: String) {
         val state = _uiState.value
         val groupId = currentFamilyGroupId ?: return
@@ -161,9 +165,6 @@ class PatientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Registra un nuevo peso y actualiza la ficha.
-     */
     fun actualizarPeso(fecha: String, valorKg: Double) {
         val state = _uiState.value
         val groupId = currentFamilyGroupId ?: return
@@ -184,9 +185,6 @@ class PatientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Actualiza campos específicos del paciente.
-     */
     fun actualizarCampos(cambios: Map<String, Any>) {
         val state = _uiState.value
         val groupId = currentFamilyGroupId ?: return

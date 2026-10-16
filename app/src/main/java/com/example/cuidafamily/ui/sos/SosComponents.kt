@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -303,13 +304,41 @@ fun SosIncomingAlertOverlayDialog(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "Hora de disparo: ${alert.fecha}",
+                            text = "Hora de emergencia: ${alert.fecha}",
                             fontSize = 13.sp,
                             color = Color.DarkGray,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Surface(
+                            color = Color(0xFFFFEBEE),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD32F2F),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Por favor, comunícate de inmediato con ${alert.disparadoPorNombre}.",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB71C1C)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
 
                         Button(
                             onClick = {

@@ -1,8 +1,5 @@
 package com.example.cuidafamily.model
 
-/**
- * Roles disponibles en el sistema CuidaFamily.
- */
 enum class Role {
     ADMINISTRADOR_FAMILIAR,
     COLABORADOR,
@@ -20,10 +17,6 @@ enum class Role {
     }
 }
 
-/**
- * Representa a un usuario individual en la aplicación.
- * Nota: Se requieren valores por defecto para Firestore.
- */
 data class User(
     val id: String = "",
     val nombre: String = "",
@@ -34,23 +27,19 @@ data class User(
     val role: Role? = null
 )
 
-/**
- * Representa un núcleo o grupo familiar de cuidado.
- */
 data class FamilyGroup(
     val id: String = "",
     val nombre: String = "",
     val codigoInvitacion: String = "",
-    val adminId: String = ""
+    val adminId: String = "",
+    val domicilioLat: Double? = null,
+    val domicilioLng: Double? = null
 )
 
-/**
- * Vincula a un usuario con un grupo familiar y le asigna un rol específico.
- */
 data class GroupMember(
     val userId: String = "",
     val nombre: String = "",
     val role: Role = Role.COLABORADOR,
-    val subtipo: String = "", // Para "Hijo/a", "Enfermero/a", "Nieto/a", etc.
+    val subtipo: String = "",
     val fechaIngreso: String = ""
 )

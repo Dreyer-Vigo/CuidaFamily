@@ -16,20 +16,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// TODO: migrar a FCM + Cloud Functions para notificación push real entre dispositivos cerrados.
 
-/**
- * Repositorio para la gestión de alertas de pánico SOS en Firestore.
- * Estructura en Firestore: familyGroups/{groupId}/sosAlerts/{alertId}
- */
 object SosRepository {
 
     private val db get() = FirebaseFirestore.getInstance()
     private val auth get() = FirebaseAuth.getInstance()
 
-    /**
-     * Dispara una nueva alerta SOS en el grupo familiar.
-     */
     suspend fun dispararAlerta(
         familyGroupId: String,
         userId: String,
@@ -71,9 +63,6 @@ object SosRepository {
         }
     }
 
-    /**
-     * Escucha en tiempo real las alertas activas (atendida == false) de un grupo familiar.
-     */
     fun escucharAlertasActivas(familyGroupId: String): Flow<List<SosAlert>> = callbackFlow {
         val user = auth.currentUser
         if (user == null) {
@@ -116,9 +105,6 @@ object SosRepository {
         awaitClose { listener.remove() }
     }
 
-    /**
-     * Marca una alerta SOS como atendida por un usuario del grupo.
-     */
     suspend fun marcarComoAtendida(
         familyGroupId: String,
         alertId: String,

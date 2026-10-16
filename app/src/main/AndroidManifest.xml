@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Permiso para desplegar notificaciones a pantalla completa en Android 10+ (API 29+) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Permiso para ejecutar servicio en primer plano para monitorear novedades y alertas -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Permisos de ubicación para verificación de entrada por GPS en turnos -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="true"
@@ -18,6 +24,24 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.CuidaFamily">
+
+        <!-- FileProvider para compartir archivos exportados en Android 10+ -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Servicio en primer plano para monitoreo en segundo plano de SOS y Bitácora -->
+        <service
+            android:name=".service.CuidaFamilyMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

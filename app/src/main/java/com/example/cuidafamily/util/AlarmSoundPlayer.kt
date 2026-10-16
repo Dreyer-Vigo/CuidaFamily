@@ -7,17 +7,9 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 
-// TODO: migrar a FCM + Cloud Functions para notificación push real entre dispositivos cerrados.
-
-/**
- * Utilidad para reproducir y detener el sonido de alarma de emergencia SOS en primer plano.
- */
 object AlarmSoundPlayer {
     private var ringtone: Ringtone? = null
 
-    /**
-     * Inicia la reproducción del sonido de alarma en bucle.
-     */
     fun playAlarm(context: Context) {
         try {
             stopAlarm()
@@ -45,9 +37,6 @@ object AlarmSoundPlayer {
         }
     }
 
-    /**
-     * Detiene la reproducción del sonido de alarma inmediatamente.
-     */
     fun stopAlarm() {
         try {
             ringtone?.let {

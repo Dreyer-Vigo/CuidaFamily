@@ -1,9 +1,11 @@
 package com.example.cuidafamily.ui.calendar
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cuidafamily.model.CalendarEvent
+import com.example.cuidafamily.model.EstadoConfirmacion
 import com.example.cuidafamily.model.Role
 import com.example.cuidafamily.model.TipoEvento
 import com.example.cuidafamily.repository.CalendarRepository
@@ -19,19 +21,16 @@ import java.time.LocalTime
 import java.util.Calendar
 import java.util.UUID
 
-/**
- * Estado que describe la información expuesta por el calendario en la UI.
- */
 data class CalendarUiState(
     val anioVisible: Int = Calendar.getInstance().get(Calendar.YEAR),
-    val mesVisible: Int = Calendar.getInstance().get(Calendar.MONTH) + 1, // 1-12
+    val mesVisible: Int = Calendar.getInstance().get(Calendar.MONTH) + 1,
     val diaSeleccionado: String = String.format(java.util.Locale.US, "%04d-%02d-%02d", 
         Calendar.getInstance().get(Calendar.YEAR),
         Calendar.getInstance().get(Calendar.MONTH) + 1,
         Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
-    ), // Formato yyyy-MM-dd
-    val eventosDelMesMap: Map<String, List<CalendarEvent>> = emptyMap(), // fecha -> Lista eventos
-    val eventosDelMesLista: List<CalendarEvent> = emptyList(), // Lista plana ordenada
+    ),
+    val eventosDelMesMap: Map<String, List<CalendarEvent>> = emptyMap(),
+    val eventosDelMesLista: List<CalendarEvent> = emptyList(),
     val eventosDelDiaSeleccionado: List<CalendarEvent> = emptyList(),
     val userRole: Role = Role.CUIDADOR_EXTERNO,
     val mensajeError: String? = null
@@ -49,18 +48,34 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     private var currentUserId: String = ""
     private var refreshJob: Job? = null
 
-    init {
-        // La actualización ahora se maneja dentro de load/refresh para ser más eficiente
-    }
+    fun iniciar(userId: String, familyGroupId: String, role: Role = Role.CUIDADOR_EXTERNO) {
+        if (familyGroupId.isBlank() || userId.isBlank()) return
 
-    /**
-     * Inicializa los datos de entorno del grupo y el rol.
-     */
-    fun inicializarCalendario(familyGroupId: String, role: Role, userId: String = "MOCK_USER_ID") {
+        if (familyGroupId == currentFamilyGroupId && userId == currentUserId && refreshJob?.isActive == true) {
+            return
+        }
+
+        Log.d("Sesion", "Reiniciando listeners para uid=$userId grupo=$familyGroupId en CalendarViewModel")
+
+        limpiar()
         currentFamilyGroupId = familyGroupId
         currentUserId = userId
         _uiState.update { it.copy(userRole = role) }
         refrescarEventos()
+    }
+
+    fun inicializarCalendario(familyGroupId: String, role: Role, userId: String = "MOCK_USER_ID") {
+        val uid = if (userId != "MOCK_USER_ID") userId else (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "")
+        iniciar(uid, familyGroupId, role)
+    }
+
+    fun limpiar() {
+        refreshJob?.cancel()
+        refreshJob = null
+        currentFamilyGroupId = ""
+        currentUserId = ""
+        CalendarRepository.limpiarMemoria()
+        _uiState.value = CalendarUiState()
     }
 
     fun cambiarMes(avanzar: Boolean) {
@@ -83,9 +98,6 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         refrescarEventos()
     }
 
-    /**
-     * Envía un evento nuevo al repositorio.
-     */
     fun agregarEvento(
         titulo: String,
         tipo: TipoEvento,
@@ -96,7 +108,10 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         asignadoAUserId: String?,
         asignadoANombre: String?,
         asignadoARol: Role?,
-        creadoPorUserId: String
+        creadoPorUserId: String,
+        lugar: String = "",
+        rolAsignado: String = "",
+        fotoUrl: String = ""
     ) {
         if (!_uiState.value.canWrite) return
 
@@ -115,7 +130,11 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                 creadoPorUserId = creadoPorUserId,
                 notas = notas,
                 completado = false,
-                familyGroupId = currentFamilyGroupId
+                familyGroupId = currentFamilyGroupId,
+                confirmacionAsistencia = EstadoConfirmacion.PENDIENTE,
+                lugar = lugar,
+                rolAsignado = rolAsignado,
+                fotoUrl = fotoUrl
             )
             val result = CalendarRepository.crearEvento(nuevoEvento)
             
@@ -151,6 +170,15 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun reasignarEvento(eventId: String, nuevoUserId: String, nuevoNombre: String, nuevoRol: Role?) {
+        viewModelScope.launch {
+            val result = CalendarRepository.reasignarEvento(currentFamilyGroupId, eventId, nuevoUserId, nuevoNombre, nuevoRol)
+            if (result is Result.Error) {
+                _uiState.update { it.copy(mensajeError = result.exception.message) }
+            }
+        }
+    }
+
     fun borrarEvento(eventId: String) {
         if (!_uiState.value.canWrite) return
 
@@ -175,9 +203,15 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /**
-     * Limpia el mensaje de error de la UI.
-     */
+    fun responderAsistencia(eventId: String, estado: EstadoConfirmacion, motivo: String = "") {
+        viewModelScope.launch {
+            val result = CalendarRepository.actualizarConfirmacionAsistencia(currentFamilyGroupId, eventId, estado, motivo)
+            if (result is Result.Error) {
+                _uiState.update { it.copy(mensajeError = result.exception.message) }
+            }
+        }
+    }
+
     fun limpiarError() {
         _uiState.update { it.copy(mensajeError = null) }
     }
@@ -189,7 +223,6 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         refreshJob = viewModelScope.launch {
             val state = _uiState.value
             
-            // Combinar los dos flujos en tiempo real: mes y día seleccionado
             kotlinx.coroutines.flow.combine(
                 CalendarRepository.obtenerEventosDelMesRealTime(currentFamilyGroupId, state.mesVisible, state.anioVisible),
                 CalendarRepository.obtenerEventosDelDiaRealTime(currentFamilyGroupId, state.diaSeleccionado)

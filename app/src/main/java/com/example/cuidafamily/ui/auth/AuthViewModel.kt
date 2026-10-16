@@ -16,9 +16,6 @@ import kotlinx.coroutines.tasks.await
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
-/**
- * Representa el estado de una operación de autenticación o creación de grupo.
- */
 sealed class AuthStatus {
     object Idle : AuthStatus()
     object Loading : AuthStatus()
@@ -26,9 +23,6 @@ sealed class AuthStatus {
     data class Error(val message: String) : AuthStatus()
 }
 
-/**
- * Estado general de la UI para el flujo de registro y configuración inicial.
- */
 data class AuthUiState(
     val nombre: String = "",
     val email: String = "",
@@ -38,11 +32,10 @@ data class AuthUiState(
     val familyGroupId: String? = null,
     val codigoInvitacion: String = "",
     val nombreGrupo: String = "",
-    val subtipo: String = "", // "Hijo/a", "Enfermero/a", etc.
+    val subtipo: String = "",
     val parentescoPersonalizado: String = "",
     val authStatus: AuthStatus = AuthStatus.Idle
 ) {
-    // Lógica para habilitar el botón de registro final
     val isRegisterEnabled: Boolean
         get() = nombre.isNotBlank() &&
                 email.isNotBlank() &&
@@ -55,7 +48,6 @@ data class AuthUiState(
                     else -> codigoInvitacion.length == 6
                 }
     
-    // Lógica para habilitar el botón "Continuar" en la pantalla de Subtipo
     val isSubtipoContinuarEnabled: Boolean
         get() = when (selectedRole) {
             Role.COLABORADOR -> parentescoPersonalizado.isNotBlank()
@@ -85,10 +77,9 @@ class AuthViewModel : ViewModel() {
     }
 
     fun onRoleSelected(role: Role) {
-        // Al cambiar el rol principal, reseteamos el subtipo por defecto según el rol
         val defaultSubtipo = when (role) {
             Role.ADMINISTRADOR_FAMILIAR -> "Hijo/a"
-            Role.COLABORADOR -> "" // Campo libre
+            Role.COLABORADOR -> ""
             Role.CUIDADOR_EXTERNO -> "Enfermero/a"
         }
         _uiState.update { it.copy(selectedRole = role, subtipo = defaultSubtipo, parentescoPersonalizado = "") }
@@ -112,9 +103,6 @@ class AuthViewModel : ViewModel() {
         _uiState.update { it.copy(parentescoPersonalizado = input) }
     }
 
-    /**
-     * Realiza el inicio de sesión y carga los datos de perfil (grupo y rol) guardados.
-     */
     fun login() {
         val currentState = _uiState.value
         if (currentState.email.isBlank() || currentState.contrasenia.isBlank()) {
@@ -142,9 +130,6 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Procesa el registro completo.
-     */
     fun registrarUsuarioYConfigurarGrupo() {
         val currentState = _uiState.value
         if (!currentState.isRegisterEnabled) {
@@ -180,7 +165,6 @@ class AuthViewModel : ViewModel() {
     private suspend fun configurarGrupoParaUsuario(user: User, state: AuthUiState) {
         val role = state.selectedRole ?: return
         
-        // Determinamos el subtipo final a guardar
         val subtipoFinal = if (role == Role.COLABORADOR) {
             state.parentescoPersonalizado
         } else {
@@ -217,9 +201,6 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Revisa si existe una sesión activa y recupera el perfil completo (grupo y rol) de Firestore.
-     */
     fun revisarSesion() {
         val user = FirebaseAuth.getInstance().currentUser
         if (user != null) {

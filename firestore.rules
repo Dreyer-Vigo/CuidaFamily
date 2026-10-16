@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isMemberOfGroup(groupId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function getGroupRole(groupId) {
+      return get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin(groupId) {
+      return isMemberOfGroup(groupId) && getGroupRole(groupId) == 'ADMINISTRADOR_FAMILIAR';
+    }
+
+    function isCollaborator(groupId) {
+      return isMemberOfGroup(groupId) && getGroupRole(groupId) == 'COLABORADOR';
+    }
+
+    function canAccessSensitive(groupId) {
+      return isAdmin(groupId) || isCollaborator(groupId);
+    }
+
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    match /familyGroups/{groupId} {
+      allow read: if isMemberOfGroup(groupId);
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin(groupId);
+
+      match /members/{memberId} {
+        allow read: if isMemberOfGroup(groupId);
+        allow create, update, delete: if isAdmin(groupId) || request.auth.uid == memberId;
+      }
+
+      // Ficha del Paciente
+      match /patients/{patientId} {
+        allow read: if isMemberOfGroup(groupId);
+        allow create, update, delete: if isAdmin(groupId);
+
+        // Subcolección 'datosSensibles' (DNI, Historia Clínica, Contacto Emergencia, etc.)
+        match /datosSensibles/{docId} {
+          allow read: if canAccessSensitive(groupId);
+          allow create, update, delete: if isAdmin(groupId);
+        }
+
+        // Subcolección 'documentos'
+        match /documentos/{documentoId} {
+          allow read: if canAccessSensitive(groupId);
+          allow create, update, delete: if canAccessSensitive(groupId);
+        }
+
+        // Subcolección 'allergies'
+        match /allergies/{allergyId} {
+          allow read: if isMemberOfGroup(groupId);
+          allow create, update, delete: if isAdmin(groupId) || isCollaborator(groupId);
+        }
+
+        // Subcolección 'weightHistory'
+        match /weightHistory/{weightId} {
+          allow read: if isMemberOfGroup(groupId);
+          allow create, update, delete: if isMemberOfGroup(groupId);
+        }
+      }
+
+      // Gestión de Turnos (Requerimiento 18)
+      match /turnos/{turnoId} {
+        // Lectura para cualquier miembro del grupo familiar
+        allow read: if isMemberOfGroup(groupId);
+        // Escritura/Asignación solo para ADMINISTRADOR_FAMILIAR
+        allow create, update, delete: if isAdmin(groupId);
+      }
+
+      // Check-Ins de Turnos con Validación GPS
+      match /turnoCheckIns/{checkInId} {
+        // Lectura para cualquier miembro del grupo familiar
+        allow read: if isMemberOfGroup(groupId);
+        // Escritura de Check-In permitida para cualquier miembro del grupo autenticado (incluye CUIDADOR_EXTERNO)
+        allow create, update, delete: if isMemberOfGroup(groupId);
+      }
+
+      // Bitácora de Novedades
+      match /bitacora/{entradaId} {
+        allow read: if isMemberOfGroup(groupId);
+        allow create, update, delete: if isMemberOfGroup(groupId);
+      }
+
+      // Calendario y Agenda
+      match /events/{eventId} {
+        allow read: if isMemberOfGroup(groupId);
+        allow create, update, delete: if isMemberOfGroup(groupId);
+      }
+
+      // Alertas SOS
+      match /sosAlerts/{alertId} {
+        allow read, create, update: if isMemberOfGroup(groupId);
+      }
+    }
+  }
+}

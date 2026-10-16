@@ -1,6 +1,7 @@
 package com.example.cuidafamily.ui.sos
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cuidafamily.model.SosAlert
@@ -37,29 +38,27 @@ class SosViewModel : ViewModel() {
     private var listeningJob: Job? = null
     private var lastNotifiedAlertId: String? = null
 
-    /**
-     * Inicia la escucha en tiempo real de las alertas de emergencia del grupo familiar.
-     */
-    fun iniciarEscucha(
-        familyGroupId: String,
+    fun iniciar(
         userId: String,
-        userName: String,
+        familyGroupId: String,
+        userName: String = "",
         context: Context? = null
     ) {
-        if (familyGroupId.isBlank()) return
+        if (familyGroupId.isBlank() || userId.isBlank()) return
 
         if (familyGroupId == currentGroupId && userId == currentUserId && listeningJob?.isActive == true) {
             return
         }
 
+        Log.d("Sesion", "Reiniciando listeners para uid=$userId grupo=$familyGroupId en SosViewModel")
+
+        limpiar()
         currentGroupId = familyGroupId
         currentUserId = userId
         currentUserName = userName
 
-        listeningJob?.cancel()
         listeningJob = viewModelScope.launch {
             SosRepository.escucharAlertasActivas(familyGroupId).collectLatest { alerts ->
-                // Alerta activa disparada por otro miembro del grupo que aún no ha sido atendida
                 val incoming = alerts.firstOrNull { it.disparadoPorUserId != currentUserId && !it.atendida }
 
                 if (incoming != null && incoming.id != lastNotifiedAlertId && context != null) {
@@ -81,6 +80,24 @@ class SosViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    fun iniciarEscucha(
+        familyGroupId: String,
+        userId: String,
+        userName: String,
+        context: Context? = null
+    ) {
+        iniciar(userId, familyGroupId, userName, context)
+    }
+
+    fun limpiar() {
+        listeningJob?.cancel()
+        listeningJob = null
+        currentGroupId = null
+        currentUserId = ""
+        currentUserName = ""
+        _uiState.value = SosUiState()
     }
 
     fun solicitarConfirmacionSos() {

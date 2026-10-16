@@ -2,6 +2,7 @@ package com.example.cuidafamily.repository
 
 import android.util.Log
 import com.example.cuidafamily.model.CalendarEvent
+import com.example.cuidafamily.model.EstadoConfirmacion
 import com.example.cuidafamily.model.Role
 import com.example.cuidafamily.model.TipoEvento
 import com.google.firebase.FirebaseException
@@ -22,10 +23,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.time.LocalTime
 
-/**
- * Repositorio de agenda para la gestión colaborativa de los Eventos del Calendario en Firestore.
- * Estructura: familyGroups/{groupId}/events/{eventId}
- */
 object CalendarRepository {
 
     private val db get() = FirebaseFirestore.getInstance()
@@ -36,9 +33,6 @@ object CalendarRepository {
 
     private var listenerRegistration: ListenerRegistration? = null
 
-    /**
-     * Activa la escucha en tiempo real para un grupo familiar específico.
-     */
     fun monitorizarEventosDelGrupo(familyGroupId: String) {
         val user = auth.currentUser
         if (user == null) {
@@ -70,9 +64,6 @@ object CalendarRepository {
             }
     }
 
-    /**
-     * Inserta un nuevo evento programado en Firestore.
-     */
     suspend fun crearEvento(event: CalendarEvent): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida, vuelve a iniciar sesión."))
@@ -89,9 +80,6 @@ object CalendarRepository {
         }
     }
 
-    /**
-     * Actualiza un evento preexistente.
-     */
     suspend fun editarEvento(event: CalendarEvent): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -108,9 +96,6 @@ object CalendarRepository {
         }
     }
 
-    /**
-     * Elimina físicamente un evento del calendario.
-     */
     suspend fun eliminarEvento(familyGroupId: String, eventId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -127,9 +112,6 @@ object CalendarRepository {
         }
     }
 
-    /**
-     * Obtiene de forma asíncrona la lista de eventos filtrados por mes y año con escucha en tiempo real.
-     */
     fun obtenerEventosDelMesRealTime(familyGroupId: String, mes: Int, anio: Int): Flow<List<CalendarEvent>> = callbackFlow {
         val user = auth.currentUser
         if (user == null) {
@@ -157,9 +139,6 @@ object CalendarRepository {
         awaitClose { listener.remove() }
     }
 
-    /**
-     * Obtiene los eventos de un día específico en tiempo real.
-     */
     fun obtenerEventosDelDiaRealTime(familyGroupId: String, fecha: String): Flow<List<CalendarEvent>> = callbackFlow {
         val user = auth.currentUser
         if (user == null) {
@@ -184,9 +163,21 @@ object CalendarRepository {
         awaitClose { listener.remove() }
     }
 
-    /**
-     * Versiones suspendidas (mantenidas por compatibilidad temporal si es necesario).
-     */
+    suspend fun obtenerEventoPorId(familyGroupId: String, eventId: String): CalendarEvent? = withContext(Dispatchers.IO) {
+        val user = auth.currentUser ?: return@withContext null
+        if (familyGroupId.isBlank() || eventId.isBlank()) return@withContext null
+
+        try {
+            val doc = db.collection("familyGroups").document(familyGroupId)
+                .collection("events").document(eventId)
+                .get().await()
+            doc.toCalendarEvent()
+        } catch (e: Exception) {
+            handleFirebaseException("obtenerEventoPorId", e)
+            null
+        }
+    }
+
     suspend fun obtenerEventosDelMes(familyGroupId: String, mes: Int, anio: Int): Result<List<CalendarEvent>> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -221,9 +212,6 @@ object CalendarRepository {
         }
     }
 
-    /**
-     * Conmutador para finalizar una tarea con update() parcial.
-     */
     suspend fun marcarComoCompletado(familyGroupId: String, eventId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val user = auth.currentUser
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
@@ -240,6 +228,62 @@ object CalendarRepository {
         }
     }
 
+    suspend fun actualizarConfirmacionAsistencia(
+        familyGroupId: String,
+        eventId: String,
+        estado: EstadoConfirmacion,
+        motivo: String = ""
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            val updates = mapOf(
+                "confirmacionAsistencia" to estado.name,
+                "motivoRechazo" to motivo
+            )
+            db.collection("familyGroups").document(familyGroupId)
+                .collection("events").document(eventId)
+                .update(updates)
+                .await()
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("actualizarConfirmacionAsistencia", e)
+            Result.Error(Exception("No se pudo actualizar la confirmación de asistencia."))
+        }
+    }
+
+    suspend fun reasignarEvento(
+        familyGroupId: String,
+        eventId: String,
+        nuevoUserId: String,
+        nuevoNombre: String,
+        nuevoRol: Role?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            val updates = mapOf(
+                "asignadoAUserId" to nuevoUserId,
+                "asignadoANombre" to nuevoNombre,
+                "asignadoARol" to nuevoRol?.name,
+                "confirmacionAsistencia" to EstadoConfirmacion.PENDIENTE.name,
+                "motivoRechazo" to ""
+            )
+            db.collection("familyGroups").document(familyGroupId)
+                .collection("events").document(eventId)
+                .update(updates)
+                .await()
+
+            Log.d("CalendarRepository", "Evento $eventId reasignado a $nuevoNombre ($nuevoUserId)")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("reasignarEvento", e)
+            Result.Error(Exception("No se pudo reasignar el evento."))
+        }
+    }
+
     private fun handleFirebaseException(method: String, e: Exception) {
         if (e is FirebaseFirestoreException) {
             Log.e("CalendarRepository", "Firestore Error [$method]: Code=${e.code} - ${e.message}")
@@ -252,6 +296,14 @@ object CalendarRepository {
 
     private fun DocumentSnapshot.toCalendarEvent(): CalendarEvent? {
         return try {
+            val confirmacionStr = getString("confirmacionAsistencia")
+            val confirmacion = EstadoConfirmacion.fromString(confirmacionStr)
+            val motivoRechazo = getString("motivoRechazo") ?: ""
+            val lugar = getString("lugar") ?: ""
+            val fotoUrl = getString("fotoUrl") ?: ""
+            val rolAsignado = getString("rolAsignado") ?: ""
+            val fechaLimiteRespuesta = getLong("fechaLimiteRespuesta")
+
             CalendarEvent(
                 id = id,
                 titulo = getString("titulo") ?: "",
@@ -265,7 +317,13 @@ object CalendarRepository {
                 creadoPorUserId = getString("creadoPorUserId") ?: "",
                 notas = getString("notas"),
                 completado = getBoolean("completado") ?: false,
-                familyGroupId = getString("familyGroupId") ?: ""
+                familyGroupId = getString("familyGroupId") ?: "",
+                confirmacionAsistencia = confirmacion,
+                motivoRechazo = motivoRechazo,
+                lugar = lugar,
+                fotoUrl = fotoUrl,
+                rolAsignado = rolAsignado,
+                fechaLimiteRespuesta = fechaLimiteRespuesta
             )
         } catch (e: Exception) { null }
     }
@@ -284,7 +342,13 @@ object CalendarRepository {
             "creadoPorUserId" to creadoPorUserId,
             "notas" to notas,
             "completado" to completado,
-            "familyGroupId" to familyGroupId
+            "familyGroupId" to familyGroupId,
+            "confirmacionAsistencia" to confirmacionAsistencia.name,
+            "motivoRechazo" to motivoRechazo,
+            "lugar" to lugar,
+            "fotoUrl" to fotoUrl,
+            "rolAsignado" to rolAsignado,
+            "fechaLimiteRespuesta" to fechaLimiteRespuesta
         )
     }
 
