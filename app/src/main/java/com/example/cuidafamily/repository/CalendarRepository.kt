@@ -73,6 +73,16 @@ object CalendarRepository {
                 .collection("events").document(event.id)
                 .set(event.toFirestoreMap())
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = event.familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.CALENDARIO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = event.id,
+                descripcion = "Agendó el evento '${event.titulo}'",
+                detalleCambios = "Fecha: ${event.fecha}, Horario: ${event.horaInicio}-${event.horaFin}"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("crearEvento", e)
@@ -89,6 +99,16 @@ object CalendarRepository {
                 .collection("events").document(event.id)
                 .set(event.toFirestoreMap())
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = event.familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.CALENDARIO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.MODIFICAR,
+                entidadId = event.id,
+                descripcion = "Editó el evento '${event.titulo}'",
+                detalleCambios = "Evento modificado (Fecha: ${event.fecha})"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("editarEvento", e)
@@ -105,6 +125,16 @@ object CalendarRepository {
                 .collection("events").document(eventId)
                 .delete()
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.CALENDARIO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = eventId,
+                descripcion = "Eliminó un evento del calendario",
+                detalleCambios = "Evento eliminado de Firestore"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarEvento", e)

@@ -116,6 +116,16 @@ object BitacoraRepository {
                 .await()
 
             Log.d("BitacoraRepository", "Entrada $entradaId eliminada correctamente")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.BITACORA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = entradaId,
+                descripcion = "Eliminó una publicación de la bitácora",
+                detalleCambios = "Entrada eliminada de Firestore"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarEntrada", e)

@@ -43,6 +43,16 @@ object TurnoRepository {
             docRef.set(finalTurno).await()
             val endTime = System.currentTimeMillis()
             Log.d("TurnoRepository", "crearTurno inicio: $startTime, fin: $endTime, total: ${endTime - startTime}ms - ID: ${docRef.id}")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.TURNO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = docRef.id,
+                descripcion = "Asignó turno a ${finalTurno.cuidadorNombre}",
+                detalleCambios = "Horario: ${finalTurno.horaInicio}-${finalTurno.horaFin}"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("crearTurno", e)
@@ -106,6 +116,15 @@ object TurnoRepository {
                 .set(finalTurno, SetOptions.merge())
                 .await()
 
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.TURNO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.MODIFICAR,
+                entidadId = finalTurno.id,
+                descripcion = "Editó el turno de ${finalTurno.cuidadorNombre}",
+                detalleCambios = if (cambios.isNotEmpty()) cambios.joinToString("; ") else "Turno modificado"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("editarTurno", e)
@@ -132,6 +151,16 @@ object TurnoRepository {
                 .await()
 
             Log.d("TurnoRepository", "Turno $turnoId cancelado por admin")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.TURNO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = turnoId,
+                descripcion = "Desactivó un turno asignado",
+                detalleCambios = "Turno desactivado por el Administrador"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarTurno", e)
@@ -416,6 +445,313 @@ object TurnoRepository {
                         doc.toObject(TurnoCheckIn::class.java)
                     } catch (e: Exception) {
                         Log.e("TurnoRepository", "Error deserializando TurnoCheckIn", e)
+                        null
+                    }
+                } ?: emptyList()
+
+                trySend(list)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun crearSolicitudIntercambio(
+        familyGroupId: String,
+        solicitud: com.example.cuidafamily.model.SolicitudIntercambio,
+        turno: Turno
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+        if (solicitud.motivo.isBlank()) return@withContext Result.Error(Exception("El motivo es obligatorio."))
+
+        val hoyStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        if (solicitud.fecha < hoyStr) {
+            return@withContext Result.Error(Exception("No se puede solicitar cambio para una fecha pasada."))
+        }
+
+        if (!turno.aplicaEnFecha(solicitud.fecha)) {
+            return@withContext Result.Error(Exception("El turno no aplica en la fecha seleccionada."))
+        }
+
+        try {
+            val colRef = db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("solicitudesIntercambio")
+
+            val pendientes = colRef
+                .whereEqualTo("turnoId", solicitud.turnoId)
+                .whereEqualTo("fecha", solicitud.fecha)
+                .whereEqualTo("estado", com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE.name)
+                .get()
+                .await()
+
+            if (!pendientes.isEmpty) {
+                return@withContext Result.Error(Exception("Ya existe una solicitud pendiente de cambio para este turno en esa fecha."))
+            }
+
+            val docRef = colRef.document()
+            val finalSolicitud = solicitud.copy(
+                id = docRef.id,
+                familyGroupId = familyGroupId,
+                estado = com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE,
+                fechaCreacion = System.currentTimeMillis(),
+                vistaPorAdmin = false,
+                vistaPorSolicitante = true
+            )
+
+            docRef.set(finalSolicitud).await()
+            Log.d("Intercambio", "Solicitud creada id=${docRef.id} turno=${solicitud.turnoId} fecha=${solicitud.fecha} por ${solicitud.solicitanteNombre}")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("crearSolicitudIntercambio", e)
+            Result.Error(Exception("No se pudo enviar la solicitud de cambio."))
+        }
+    }
+
+    suspend fun cancelarSolicitudIntercambio(familyGroupId: String, solicitudId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("solicitudesIntercambio")
+                .document(solicitudId)
+                .update("estado", com.example.cuidafamily.model.EstadoSolicitud.CANCELADA.name)
+                .await()
+
+            Log.d("Intercambio", "Solicitud $solicitudId cancelada por el solicitante")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("cancelarSolicitudIntercambio", e)
+            Result.Error(Exception("No se pudo cancelar la solicitud."))
+        }
+    }
+
+    suspend fun aprobarSolicitudIntercambio(
+        familyGroupId: String,
+        solicitud: com.example.cuidafamily.model.SolicitudIntercambio,
+        reemplazoUserId: String,
+        reemplazoNombre: String,
+        adminUserId: String,
+        adminNombre: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+        if (reemplazoUserId.isBlank()) return@withContext Result.Error(Exception("Debes seleccionar un cuidador de reemplazo."))
+
+        try {
+            val yyyyMMdd = solicitud.fecha.replace("-", "")
+            val excId = "${solicitud.turnoId}_$yyyyMMdd"
+
+            val batch = db.batch()
+
+            val solRef = db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("solicitudesIntercambio")
+                .document(solicitud.id)
+
+            val updatesSol = mapOf(
+                "estado" to com.example.cuidafamily.model.EstadoSolicitud.APROBADA.name,
+                "reemplazoPropuestoUserId" to reemplazoUserId,
+                "reemplazoPropuestoNombre" to reemplazoNombre,
+                "resueltaPorUserId" to adminUserId,
+                "resueltaPorNombre" to adminNombre,
+                "fechaResolucion" to System.currentTimeMillis(),
+                "vistaPorSolicitante" to false
+            )
+            batch.update(solRef, updatesSol)
+
+            val excRef = db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("turnoExcepciones")
+                .document(excId)
+
+            val excepcion = com.example.cuidafamily.model.ExcepcionTurno(
+                id = excId,
+                familyGroupId = familyGroupId,
+                turnoId = solicitud.turnoId,
+                fecha = solicitud.fecha,
+                cuidadorOriginalUserId = solicitud.solicitanteUserId,
+                cuidadorOriginalNombre = solicitud.solicitanteNombre,
+                cuidadorReemplazoUserId = reemplazoUserId,
+                cuidadorReemplazoNombre = reemplazoNombre,
+                solicitudId = solicitud.id,
+                confirmacion = EstadoConfirmacion.PENDIENTE,
+                vistaPorReemplazo = false
+            )
+            batch.set(excRef, excepcion, SetOptions.merge())
+
+            batch.commit().await()
+
+            Log.d("Intercambio", "Solicitud ${solicitud.id} aprobada por $adminNombre. Excepción $excId creada para $reemplazoNombre")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("aprobarSolicitudIntercambio", e)
+            Result.Error(Exception("No se pudo aprobar la solicitud de cambio."))
+        }
+    }
+
+    suspend fun rechazarSolicitudIntercambio(
+        familyGroupId: String,
+        solicitudId: String,
+        motivoRechazo: String,
+        adminUserId: String,
+        adminNombre: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            val updates = mapOf(
+                "estado" to com.example.cuidafamily.model.EstadoSolicitud.RECHAZADA.name,
+                "motivoRechazo" to motivoRechazo.trim(),
+                "resueltaPorUserId" to adminUserId,
+                "resueltaPorNombre" to adminNombre,
+                "fechaResolucion" to System.currentTimeMillis(),
+                "vistaPorSolicitante" to false
+            )
+
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("solicitudesIntercambio")
+                .document(solicitudId)
+                .update(updates)
+                .await()
+
+            Log.d("Intercambio", "Solicitud $solicitudId rechazada por $adminNombre: $motivoRechazo")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("rechazarSolicitudIntercambio", e)
+            Result.Error(Exception("No se pudo rechazar la solicitud."))
+        }
+    }
+
+    suspend fun responderExcepcionTurno(
+        familyGroupId: String,
+        excepcionId: String,
+        confirmacion: EstadoConfirmacion
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            val updates = mapOf(
+                "confirmacion" to confirmacion.name,
+                "vistaPorReemplazo" to true
+            )
+
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("turnoExcepciones")
+                .document(excepcionId)
+                .update(updates)
+                .await()
+
+            Log.d("Intercambio", "Excepción $excepcionId respuesta: $confirmacion")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("responderExcepcionTurno", e)
+            Result.Error(Exception("No se pudo responder al reemplazo de turno."))
+        }
+    }
+
+    suspend fun marcarSolicitudVistaPorSolicitante(familyGroupId: String, solicitudId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("solicitudesIntercambio")
+                .document(solicitudId)
+                .update("vistaPorSolicitante", true)
+                .await()
+
+            Log.d("Intercambio", "Solicitud $solicitudId marcada como vista por solicitante")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("marcarSolicitudVistaPorSolicitante", e)
+            Result.Error(Exception("No se pudo marcar solicitud como vista."))
+        }
+    }
+
+    suspend fun marcarExcepcionVistaPorReemplazo(familyGroupId: String, excepcionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("turnoExcepciones")
+                .document(excepcionId)
+                .update("vistaPorReemplazo", true)
+                .await()
+
+            Log.d("Intercambio", "Excepción $excepcionId marcada como vista por reemplazo")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("marcarExcepcionVistaPorReemplazo", e)
+            Result.Error(Exception("No se pudo marcar excepción como vista."))
+        }
+    }
+
+    fun obtenerSolicitudesIntercambio(familyGroupId: String): Flow<List<com.example.cuidafamily.model.SolicitudIntercambio>> = callbackFlow {
+        val user = auth.currentUser
+        if (user == null || familyGroupId.isBlank() || familyGroupId == "MOCK_GROUP_ID") {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val listener = db.collection("familyGroups")
+            .document(familyGroupId)
+            .collection("solicitudesIntercambio")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirebaseException("obtenerSolicitudesIntercambio", error)
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        doc.toObject(com.example.cuidafamily.model.SolicitudIntercambio::class.java)
+                    } catch (e: Exception) {
+                        Log.e("TurnoRepository", "Error deserializando SolicitudIntercambio", e)
+                        null
+                    }
+                } ?: emptyList()
+
+                trySend(list)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    fun obtenerExcepcionesTurno(familyGroupId: String): Flow<List<com.example.cuidafamily.model.ExcepcionTurno>> = callbackFlow {
+        val user = auth.currentUser
+        if (user == null || familyGroupId.isBlank() || familyGroupId == "MOCK_GROUP_ID") {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val listener = db.collection("familyGroups")
+            .document(familyGroupId)
+            .collection("turnoExcepciones")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirebaseException("obtenerExcepcionesTurno", error)
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        doc.toObject(com.example.cuidafamily.model.ExcepcionTurno::class.java)
+                    } catch (e: Exception) {
+                        Log.e("TurnoRepository", "Error deserializando ExcepcionTurno", e)
                         null
                     }
                 } ?: emptyList()

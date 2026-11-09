@@ -103,6 +103,48 @@ service cloud.firestore {
       match /sosAlerts/{alertId} {
         allow read, create, update: if isMemberOfGroup(groupId);
       }
+
+      // Registro de Pagos a Cuidadores (Requerimiento 16)
+      match /pagos/{pagoId} {
+        allow read: if isMemberOfGroup(groupId) &&
+          (get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'ADMINISTRADOR_FAMILIAR' ||
+           get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'COLABORADOR');
+
+        allow create: if isMemberOfGroup(groupId) &&
+          (get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'ADMINISTRADOR_FAMILIAR' ||
+           get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'COLABORADOR') &&
+          request.resource.data.registradoPorUserId == request.auth.uid;
+
+        allow update: if isMemberOfGroup(groupId) &&
+          resource.data.registradoPorUserId == request.auth.uid &&
+          request.resource.data.registradoPorUserId == resource.data.registradoPorUserId;
+
+        allow delete: if isMemberOfGroup(groupId) &&
+          resource.data.registradoPorUserId == request.auth.uid;
+      }
+
+      // Tarifas por hora de Turnos (Requerimiento 16)
+      // NOTA: Para restringir las tarifas SOLO al Administrador Familiar, cambiar la condición de lectura y escritura a:
+      // get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'ADMINISTRADOR_FAMILIAR'
+      match /tarifas/{turnoId} {
+        allow read, write: if isMemberOfGroup(groupId) &&
+          (get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'ADMINISTRADOR_FAMILIAR' ||
+           get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'COLABORADOR');
+      }
+
+      // Registro de Auditoría y Actividad (Requerimiento 07)
+      match /auditoria/{logId} {
+        // Lectura permitida ÚNICAMENTE para ADMINISTRADOR_FAMILIAR
+        allow read: if isMemberOfGroup(groupId) &&
+          get(/databases/$(database)/documents/familyGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'ADMINISTRADOR_FAMILIAR';
+
+        // Creación permitida para cualquier miembro del grupo autenticado, solo si userId coincide
+        allow create: if isMemberOfGroup(groupId) &&
+          request.resource.data.userId == request.auth.uid;
+
+        // Modificación y eliminación prohibidas para todos
+        allow update, delete: if false;
+      }
     }
   }
 }

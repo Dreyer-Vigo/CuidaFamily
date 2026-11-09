@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
+import com.example.cuidafamily.util.formatearSoles
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -44,6 +47,7 @@ import androidx.compose.material.icons.filled.HomeWork
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -62,6 +66,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -89,11 +94,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import com.example.cuidafamily.BuildConfig
 import com.example.cuidafamily.model.EstadoConfirmacion
+import com.example.cuidafamily.model.EstadoSolicitud
 import com.example.cuidafamily.model.EstadoTurno
+import com.example.cuidafamily.model.ExcepcionTurno
 import com.example.cuidafamily.model.Role
+import com.example.cuidafamily.model.SolicitudIntercambio
+import com.example.cuidafamily.model.TipoIntercambio
 import com.example.cuidafamily.model.Turno
+import com.example.cuidafamily.model.cuidadorEnFecha
 import com.example.cuidafamily.repository.GroupMemberInfo
 import com.example.cuidafamily.ui.sos.SosFloatingButton
 import com.example.cuidafamily.ui.theme.GradientEnd
@@ -117,19 +129,10 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-
-fun formatHora24(horaStr: String): String {
-    if (horaStr.isBlank()) return ""
-    return try {
-        val time = LocalTime.parse(horaStr)
-        String.format(Locale.US, "%d:%02d", time.hour, time.minute)
-    } catch (e: Exception) {
-        horaStr
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,6 +154,10 @@ fun TurnoScreenContainer(
     var showConfigDomicilioDialog by remember { mutableStateOf(false) }
     var turnoToDelete by remember { mutableStateOf<Turno?>(null) }
     var turnoToReassign by remember { mutableStateOf<Turno?>(null) }
+
+    var solicitudToAprobar by remember { mutableStateOf<SolicitudIntercambio?>(null) }
+    var solicitudToRechazar by remember { mutableStateOf<SolicitudIntercambio?>(null) }
+    var turnoParaSolicitarCambio by remember { mutableStateOf<Pair<Turno, String>?>(null) }
 
     val realUserId = FirebaseAuth.getInstance().currentUser?.uid ?: currentUserId
     val locationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
@@ -296,6 +303,134 @@ fun TurnoScreenContainer(
                                 .padding(horizontal = 20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
+                            // 1. SECCIÓN: SOLICITUDES DE INTERCAMBIO PENDIENTES (Solo Administrador)
+                            val solicitudesPendientesAdmin = if (esAdmin) {
+                                uiState.solicitudesIntercambio.filter { it.estado == EstadoSolicitud.PENDIENTE }
+                            } else emptyList()
+
+                            if (solicitudesPendientesAdmin.isNotEmpty()) {
+                                item {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(2.dp, Color(0xFFE65100)),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(18.dp)) {
+                                            Surface(
+                                                color = Color(0xFFFFF3E0),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "🔄 Solicitudes de Intercambio Pendientes (${solicitudesPendientesAdmin.size})",
+                                                    color = Color(0xFFE65100),
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(12.dp))
+
+                                            solicitudesPendientesAdmin.forEach { sol ->
+                                                TarjetaSolicitudAdmin(
+                                                    solicitud = sol,
+                                                    onAprobar = { solicitudToAprobar = sol },
+                                                    onRechazar = { solicitudToRechazar = sol }
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. SECCIÓN: REEMPLAZOS ASIGNADOS PENDIENTES (Solo para el Cuidador Reemplazo)
+                            val reemplazosPendientes = if (!esAdmin) {
+                                uiState.excepcionesTurno.filter { it.cuidadorReemplazoUserId == realUserId && it.confirmacion == EstadoConfirmacion.PENDIENTE }
+                            } else emptyList()
+
+                            if (reemplazosPendientes.isNotEmpty()) {
+                                item {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(2.dp, LavandaPrimary),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(18.dp)) {
+                                            Surface(
+                                                color = LavandaPrimaryLight,
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "📅 Reemplazos de Turno Asignados (${reemplazosPendientes.size})",
+                                                    color = LavandaPrimary,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(12.dp))
+
+                                            reemplazosPendientes.forEach { exc ->
+                                                TarjetaReemplazoPendiente(
+                                                    excepcion = exc,
+                                                    onAceptar = {
+                                                        viewModel.responderExcepcionTurno(familyGroupId, exc.id, EstadoConfirmacion.CONFIRMADO)
+                                                    },
+                                                    onRechazar = {
+                                                        viewModel.responderExcepcionTurno(familyGroupId, exc.id, EstadoConfirmacion.RECHAZADO)
+                                                    }
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. SECCIÓN: MIS SOLICITUDES ENVIADAS (Para el Cuidador Solicitante)
+                            val misSolicitudes = if (!esAdmin) {
+                                uiState.solicitudesIntercambio.filter { it.solicitanteUserId == realUserId }
+                            } else emptyList()
+
+                            if (misSolicitudes.isNotEmpty()) {
+                                item {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.3f)),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(18.dp)) {
+                                            Text(
+                                                text = "📋 Mis Solicitudes de Cambio (${misSolicitudes.size})",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = TextoPrincipalColor
+                                            )
+
+                                            Spacer(modifier = Modifier.height(10.dp))
+
+                                            misSolicitudes.forEach { sol ->
+                                                TarjetaMiSolicitudCuidador(
+                                                    solicitud = sol,
+                                                    onCancelar = {
+                                                        viewModel.cancelarSolicitudIntercambio(familyGroupId, sol.id)
+                                                    }
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // Sección de Avisos de Turnos Cancelados para el Cuidador
                             val avisosCancelados = uiState.turnosCanceladosAvisos
                             if (avisosCancelados.isNotEmpty()) {
@@ -418,7 +553,7 @@ fun TurnoScreenContainer(
                                 }
                             }
 
-                            // Sección "Pendientes de tu respuesta" para el Cuidador (excluye turnos cuya fechaFin ya pasó)
+                            // Sección "Pendientes de tu respuesta" para el Cuidador
                             val turnosPendientes = uiState.turnosActivos.filter {
                                 it.cuidadorUserId == realUserId && it.confirmacion == EstadoConfirmacion.PENDIENTE && !it.esVencido()
                             }
@@ -467,7 +602,7 @@ fun TurnoScreenContainer(
                                 }
                             }
 
-                            // Banner "Turnos registrados fuera de esta semana" si existen turnos pero ninguno aplica a la semana visible
+                            // Banner "Turnos registrados fuera de esta semana"
                             val turnosAplicanSemana = diasSemana.sumOf { dia -> viewModel.obtenerTurnosParaDia(dia).size }
                             if (uiState.turnosActivos.isNotEmpty() && turnosAplicanSemana == 0) {
                                 item {
@@ -558,10 +693,20 @@ fun TurnoScreenContainer(
                                                 turnoConEstado = itemConEstado,
                                                 currentUserId = realUserId,
                                                 userRole = userRole,
+                                                puedeVerFinanzas = com.example.cuidafamily.util.Permisos.puedeVerFinanzas(userRole),
+                                                tarifaPorHora = uiState.tarifasMap[itemConEstado.turno.id],
                                                 canDelete = esAdmin,
+                                                excepciones = uiState.excepcionesTurno,
+                                                solicitudes = uiState.solicitudesIntercambio,
                                                 onEditClick = { turnoToEdit = itemConEstado.turno },
                                                 onDeleteClick = { turnoToDelete = itemConEstado.turno },
                                                 onReasignarClick = { turnoToReassign = itemConEstado.turno },
+                                                onSolicitarCambio = {
+                                                    turnoParaSolicitarCambio = Pair(itemConEstado.turno, itemConEstado.fechaStr)
+                                                },
+                                                onCancelarSolicitud = { solicitudId ->
+                                                    viewModel.cancelarSolicitudIntercambio(familyGroupId, solicitudId)
+                                                },
                                                 onCallClick = { tel ->
                                                     try {
                                                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$tel"))
@@ -588,17 +733,22 @@ fun TurnoScreenContainer(
     }
 
     if (showCrearDialog || turnoToEdit != null) {
+        val puedeVerFinanzas = com.example.cuidafamily.util.Permisos.puedeVerFinanzas(userRole)
+        val initialTarifa = uiState.tarifasMap[turnoToEdit?.id]
+
         CrearTurnoDialog(
             miembros = uiState.miembrosGrupo,
             initialTurno = turnoToEdit,
+            initialTarifa = initialTarifa,
+            puedeVerFinanzas = puedeVerFinanzas,
             isSaving = uiState.isSaving,
             onDismiss = {
                 showCrearDialog = false
                 turnoToEdit = null
             },
-            onCrear = { cuidadorUserId, cuidadorNombre, tel, dias, hIni, hFin, tareas, fInicio, fFin ->
+            onCrear = { cuidadorUserId, cuidadorNombre, tel, dias, hIni, hFin, tareas, fInicio, fFin, tarifaPorHora ->
                 if (turnoToEdit != null) {
-                    val nuevoTurnoEditado = turnoToEdit!!.copy(
+                    val nuevo = turnoToEdit!!.copy(
                         cuidadorUserId = cuidadorUserId,
                         cuidadorNombre = cuidadorNombre,
                         cuidadorTelefono = tel,
@@ -609,7 +759,7 @@ fun TurnoScreenContainer(
                         fechaInicio = fInicio,
                         fechaFin = fFin
                     )
-                    viewModel.modificarTurno(familyGroupId, turnoToEdit, nuevoTurnoEditado)
+                    viewModel.modificarTurno(familyGroupId, turnoToEdit, nuevo, tarifaPorHora, userRole)
                     turnoToEdit = null
                 } else {
                     viewModel.crearTurno(
@@ -623,7 +773,9 @@ fun TurnoScreenContainer(
                         tareas = tareas,
                         creadoPorUserId = realUserId,
                         fechaInicio = fInicio,
-                        fechaFin = fFin
+                        fechaFin = fFin,
+                        tarifaPorHora = tarifaPorHora,
+                        userRole = userRole
                     )
                     showCrearDialog = false
                 }
@@ -633,8 +785,6 @@ fun TurnoScreenContainer(
 
     if (showConfigDomicilioDialog) {
         ConfigurarDomicilioDialog(
-            currentLat = uiState.domicilioLat,
-            currentLng = uiState.domicilioLng,
             isSaving = uiState.isSaving,
             onDismiss = { showConfigDomicilioDialog = false },
             onRequestLocation = requestLocationAndExecute,
@@ -646,254 +796,299 @@ fun TurnoScreenContainer(
         )
     }
 
-    turnoToReassign?.let { t ->
-        ReasignarTurnoDialog(
-            miembros = uiState.miembrosGrupo,
-            isSaving = uiState.isSaving,
-            onDismiss = { turnoToReassign = null },
-            onConfirm = { m ->
-                viewModel.reasignarTurno(familyGroupId, t.id, m.member.userId, m.userName, "")
-                turnoToReassign = null
-            }
-        )
-    }
-
-    turnoToDelete?.let { t ->
+    if (turnoToDelete != null) {
         AlertDialog(
             onDismissRequest = { turnoToDelete = null },
-            title = { Text("Eliminar Turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-            text = { Text("¿Eliminar este turno asignado a '${t.cuidadorNombre}'? Esta acción desactivará el turno del calendario.", fontSize = 14.sp) },
+            title = { Text("Cancelar Turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = { Text("¿Deseas cancelar este turno? El cuidador asignado recibirá un aviso de que el turno fue desactivado.", fontSize = 14.sp) },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.desactivarTurno(familyGroupId, t.id)
+                        val id = turnoToDelete?.id ?: ""
+                        if (id.isNotBlank()) {
+                            viewModel.desactivarTurno(familyGroupId, id)
+                        }
                         turnoToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Eliminar", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Cancelar Turno", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { turnoToDelete = null }, shape = RoundedCornerShape(12.dp)) {
-                    Text("Cancelar", color = Color.Gray)
+                    Text("Volver", color = Color.Gray)
                 }
             },
             containerColor = Color.White,
             shape = RoundedCornerShape(20.dp)
         )
     }
-}
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun TarjetaRespuestaRecienteAdmin(
-    turno: Turno,
-    onMarcarVisto: () -> Unit,
-    onReasignar: () -> Unit
-) {
-    val (badgeBg, badgeText, badgeLabel) = when (turno.confirmacion) {
-        EstadoConfirmacion.CONFIRMADO -> Triple(Color(0xFFE8F5E9), Color(0xFF2E7D32), "✅ Confirmó")
-        EstadoConfirmacion.RECHAZADO -> Triple(Color(0xFFFFEBEE), Color(0xFFC62828), "❌ No puede cubrirlo")
-        EstadoConfirmacion.REEMPLAZO_SOLICITADO -> Triple(Color(0xFFEDE7F6), Color(0xFF673AB7), "🔄 Solicita reemplazo")
-        EstadoConfirmacion.PENDIENTE -> Triple(Color(0xFFFFF3E0), Color(0xFFE65100), "⏳ Pendiente")
+    if (turnoToReassign != null) {
+        ReasignarTurnoDialog(
+            turno = turnoToReassign!!,
+            miembros = uiState.miembrosGrupo,
+            isSaving = uiState.isSaving,
+            onDismiss = { turnoToReassign = null },
+            onReasignar = { nId, nNombre, nTel ->
+                viewModel.reasignarTurno(familyGroupId, turnoToReassign!!.id, nId, nNombre, nTel)
+                turnoToReassign = null
+            }
+        )
     }
 
-    val diasTexto = turno.diasSemana.map { dayNum ->
-        when (dayNum) {
-            2 -> "L"; 3 -> "M"; 4 -> "X"; 5 -> "J"; 6 -> "V"; 7 -> "S"; 1 -> "D"; else -> ""
-        }
-    }.filter { it.isNotBlank() }.joinToString(", ")
+    if (solicitudToAprobar != null) {
+        AprobarSolicitudDialog(
+            solicitud = solicitudToAprobar!!,
+            miembros = uiState.miembrosGrupo,
+            isSaving = uiState.isSaving,
+            onDismiss = { solicitudToAprobar = null },
+            onAprobar = { rId, rNombre ->
+                viewModel.aprobarSolicitudIntercambio(
+                    familyGroupId,
+                    solicitudToAprobar!!,
+                    rId,
+                    rNombre,
+                    realUserId,
+                    userName
+                )
+                solicitudToAprobar = null
+            }
+        )
+    }
 
+    if (solicitudToRechazar != null) {
+        RechazarSolicitudDialog(
+            solicitud = solicitudToRechazar!!,
+            isSaving = uiState.isSaving,
+            onDismiss = { solicitudToRechazar = null },
+            onRechazar = { motivo ->
+                viewModel.rechazarSolicitudIntercambio(
+                    familyGroupId,
+                    solicitudToRechazar!!.id,
+                    motivo,
+                    realUserId,
+                    userName
+                )
+                solicitudToRechazar = null
+            }
+        )
+    }
+
+    if (turnoParaSolicitarCambio != null) {
+        val (t, fStr) = turnoParaSolicitarCambio!!
+        SolicitarCambioDialog(
+            turno = t,
+            fechaStr = fStr,
+            miembros = uiState.miembrosGrupo,
+            currentUserId = realUserId,
+            isSaving = uiState.isSaving,
+            onDismiss = { turnoParaSolicitarCambio = null },
+            onSubmit = { motivo, tipo, rId, rNombre ->
+                val sol = SolicitudIntercambio(
+                    familyGroupId = familyGroupId,
+                    turnoId = t.id,
+                    fecha = fStr,
+                    horaInicio = t.horaInicio,
+                    horaFin = t.horaFin,
+                    solicitanteUserId = realUserId,
+                    solicitanteNombre = userName,
+                    tipo = tipo,
+                    reemplazoPropuestoUserId = rId,
+                    reemplazoPropuestoNombre = rNombre,
+                    motivo = motivo
+                )
+                viewModel.crearSolicitudIntercambio(familyGroupId, sol, t)
+                turnoParaSolicitarCambio = null
+            }
+        )
+    }
+}
+
+@Composable
+fun TarjetaSolicitudAdmin(
+    solicitud: SolicitudIntercambio,
+    onAprobar: () -> Unit,
+    onRechazar: () -> Unit
+) {
     Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.2f)),
-        shadowElevation = 2.dp,
+        color = Color(0xFFFFF8E1),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color(0xFFFFE082)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = turno.cuidadorNombre,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    text = "👤 ${solicitud.solicitanteNombre}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
                     color = TextoPrincipalColor
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                Surface(color = badgeBg, shape = RoundedCornerShape(8.dp)) {
+                Surface(
+                    color = Color(0xFFFFE082),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
                     Text(
-                        text = badgeLabel,
-                        color = badgeText,
-                        fontSize = 12.sp,
+                        text = if (solicitud.tipo == TipoIntercambio.PROPONER) "Propone reemplazo" else "Pide asignación",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                        color = Color(0xFFE65100),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("📅 Fecha: ${solicitud.fecha} (${formatHora24(solicitud.horaInicio)} - ${formatHora24(solicitud.horaFin)})", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LavandaPrimary)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text("Motivo: \"${solicitud.motivo}\"", fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = TextoSecundarioColor)
 
-            Text(
-                text = "Horario: $diasTexto · ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
-                fontSize = 14.sp,
-                color = TextoSecundarioColor
-            )
-
-            if (turno.motivoRechazo.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Motivo: \"${turno.motivoRechazo}\"",
-                    fontSize = 13.sp,
-                    color = if (turno.confirmacion == EstadoConfirmacion.RECHAZADO) Color(0xFFC62828) else Color(0xFF673AB7),
-                    fontWeight = FontWeight.SemiBold
-                )
+            if (solicitud.tipo == TipoIntercambio.PROPONER && solicitud.reemplazoPropuestoNombre.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Reemplazo propuesto: ${solicitud.reemplazoPropuestoNombre}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (turno.confirmacion == EstadoConfirmacion.RECHAZADO || turno.confirmacion == EstadoConfirmacion.REEMPLAZO_SOLICITADO) {
-                    Button(
-                        onClick = onReasignar,
-                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Text("Reasignar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
+                Button(
+                    onClick = onAprobar,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text("Aprobar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
 
                 OutlinedButton(
-                    onClick = onMarcarVisto,
+                    onClick = onRechazar,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.weight(1f).height(38.dp)
                 ) {
-                    Text("Marcar como visto", fontSize = 12.sp, color = TextoSecundarioColor)
+                    Text("Rechazar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TarjetaTurnoPendienteRespuesta(
-    turno: Turno,
-    onConfirmar: () -> Unit,
-    onRechazar: (String) -> Unit,
-    onSolicitarReemplazo: (String) -> Unit
+fun TarjetaReemplazoPendiente(
+    excepcion: ExcepcionTurno,
+    onAceptar: () -> Unit,
+    onRechazar: () -> Unit
 ) {
-    var showRechazoDialog by remember { mutableStateOf(false) }
-    var showReemplazoDialog by remember { mutableStateOf(false) }
-
-    val diasTexto = turno.diasSemana.map { dayNum ->
-        when (dayNum) {
-            2 -> "Lun"
-            3 -> "Mar"
-            4 -> "Mié"
-            5 -> "Jue"
-            6 -> "Vie"
-            7 -> "Sáb"
-            1 -> "Dom"
-            else -> ""
-        }
-    }.joinToString(", ")
-
     Surface(
-        color = Color(0xFFFFF8E1),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, Color(0xFFFFE082)),
+        color = Color(0xFFEDE7F6),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.4f)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "📅 Cubrir turno del ${excepcion.fecha}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = LavandaPrimary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Titular original: ${excepcion.cuidadorOriginalNombre}", fontSize = 13.sp, color = TextoPrincipalColor)
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onAceptar,
+                    colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text("Puedo cubrirlo", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                OutlinedButton(
+                    onClick = onRechazar,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text("No puedo", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TarjetaMiSolicitudCuidador(
+    solicitud: SolicitudIntercambio,
+    onCancelar: () -> Unit
+) {
+    val (estadoBg, estadoText, estadoLabel) = when (solicitud.estado) {
+        EstadoSolicitud.PENDIENTE -> Triple(Color(0xFFFFF3E0), Color(0xFFE65100), "⏳ Pendiente de aprobación")
+        EstadoSolicitud.APROBADA -> Triple(Color(0xFFE8F5E9), Color(0xFF2E7D32), "✅ Aprobada")
+        EstadoSolicitud.RECHAZADA -> Triple(Color(0xFFFFEBEE), Color(0xFFC62828), "❌ Rechazada")
+        EstadoSolicitud.CANCELADA -> Triple(Color(0xFFEEEEEE), Color.Gray, "🚫 Cancelada")
+    }
+
+    Surface(
+        color = Color(0xFFFAFAFA),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Horario: ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
+                    text = "📅 ${solicitud.fecha} (${formatHora24(solicitud.horaInicio)} - ${formatHora24(solicitud.horaFin)})",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color(0xFFE65100)
+                    fontSize = 13.sp,
+                    color = TextoPrincipalColor
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                Text("Días: $diasTexto", fontSize = 13.sp, color = TextoSecundarioColor, fontWeight = FontWeight.SemiBold)
+
+                Surface(color = estadoBg, shape = RoundedCornerShape(6.dp)) {
+                    Text(
+                        text = estadoLabel,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = estadoText,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
 
-            if (turno.tareas.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Motivo: \"${solicitud.motivo}\"", fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = TextoSecundarioColor)
+
+            if (solicitud.estado == EstadoSolicitud.RECHAZADA && solicitud.motivoRechazo.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Motivo rechazo: ${solicitud.motivoRechazo}", fontSize = 12.sp, color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
+            }
+
+            if (solicitud.estado == EstadoSolicitud.PENDIENTE) {
                 Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    turno.tareas.forEach { t ->
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(t, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextoPrincipalColor, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                        }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onCancelar) {
+                        Text("Cancelar solicitud", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onConfirmar,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Text("Puedo cubrir este turno", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-
-                OutlinedButton(
-                    onClick = { showRechazoDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
-                    border = BorderStroke(1.5.dp, Color(0xFFC62828)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Text("No puedo cubrirlo", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-
-                OutlinedButton(
-                    onClick = { showReemplazoDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF673AB7)),
-                    border = BorderStroke(1.5.dp, Color(0xFF673AB7)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Text("Solicitar reemplazo", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-            }
         }
-    }
-
-    if (showRechazoDialog) {
-        MotivoRechazoTurnoDialog(
-            onDismiss = { showRechazoDialog = false },
-            onConfirm = { motivo ->
-                onRechazar(motivo)
-                showRechazoDialog = false
-            }
-        )
-    }
-
-    if (showReemplazoDialog) {
-        MotivoRechazoTurnoDialog(
-            titulo = "Solicitar reemplazo",
-            subtitulo = "Explica la razón por la que requieres un reemplazo:",
-            onDismiss = { showReemplazoDialog = false },
-            onConfirm = { motivo ->
-                onSolicitarReemplazo(motivo)
-                showReemplazoDialog = false
-            }
-        )
     }
 }
 
@@ -902,17 +1097,27 @@ fun TurnoCard(
     turnoConEstado: TurnoConEstado,
     currentUserId: String = "",
     userRole: Role = Role.CUIDADOR_EXTERNO,
+    puedeVerFinanzas: Boolean = false,
+    tarifaPorHora: Double? = null,
     canDelete: Boolean,
+    excepciones: List<ExcepcionTurno> = emptyList(),
+    solicitudes: List<SolicitudIntercambio> = emptyList(),
     onEditClick: () -> Unit = {},
     onDeleteClick: () -> Unit = {},
     onReasignarClick: () -> Unit = {},
+    onSolicitarCambio: () -> Unit = {},
+    onCancelarSolicitud: (String) -> Unit = {},
     onCallClick: (String) -> Unit,
     onResponderConfirmacion: (EstadoConfirmacion, String) -> Unit = { _, _ -> }
 ) {
     val turno = turnoConEstado.turno
-    val showButtons = (turno.cuidadorUserId == currentUserId && turno.confirmacion == EstadoConfirmacion.PENDIENTE)
+    val hoyStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    val fechaLocalDate = try { LocalDate.parse(turnoConEstado.fechaStr) } catch (e: Exception) { LocalDate.now() }
 
-    Log.d("TurnoCard", "turnoId=${turno.id}, cuidadorUserId=${turno.cuidadorUserId}, currentUserId=$currentUserId, confirmacion=${turno.confirmacion}, rol=$userRole, showButtons=$showButtons")
+    val cuidadorResult = cuidadorEnFecha(turno, fechaLocalDate, excepciones, solicitudes)
+    val esAdmin = userRole == Role.ADMINISTRADOR_FAMILIAR
+
+    val showButtons = (turno.cuidadorUserId == currentUserId && turno.confirmacion == EstadoConfirmacion.PENDIENTE)
 
     val (badgeBg, badgeText, badgeLabel) = when (turnoConEstado.estado) {
         EstadoTurno.PROGRAMADO -> Triple(Color(0xFFFFF3E0), Color(0xFFE65100), "Programado")
@@ -921,13 +1126,12 @@ fun TurnoCard(
     }
 
     var showMotivoDialog by remember { mutableStateOf(false) }
-    val esAdmin = userRole == Role.ADMINISTRADOR_FAMILIAR
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(18.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.15f)),
+        border = BorderStroke(1.dp, if (cuidadorResult.esReemplazo) Color(0xFF81C784) else LavandaPrimary.copy(alpha = 0.15f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
@@ -970,175 +1174,193 @@ fun TurnoCard(
                     )
                 }
 
-                if (turno.fechaInicio == 0L) {
+                // Requerimiento 1: Si el usuario tiene acceso financiero, mostrar la tarifa o aviso "Sin tarifa"
+                if (puedeVerFinanzas) {
                     Spacer(modifier = Modifier.width(6.dp))
-                    Surface(color = Color(0xFFF5F5F5), shape = RoundedCornerShape(8.dp)) {
-                        Text("Sin rango de fechas", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    if (tarifaPorHora != null && tarifaPorHora > 0.0) {
+                        Surface(
+                            color = LavandaPrimaryLight,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "${formatearSoles(tarifaPorHora)} / h",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LavandaPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    } else {
+                        Surface(
+                            color = Color(0xFFFFF3E0),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFFFFB74D))
+                        ) {
+                            Text(
+                                text = "⚠️ Sin tarifa",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE65100),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (cuidadorResult.esReemplazo) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFFE8F5E9),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFF81C784))
+                    ) {
+                        Text(
+                            text = "🔄 Reemplazo",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                } else if (cuidadorResult.tieneSolicitudPendiente) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFFFFF3E0),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFFB74D))
+                    ) {
+                        Text(
+                            text = "⏳ Cambio solicitado",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE65100),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                if (turnoConEstado.checkIn != null) {
-                    val iconCheck = if (turnoConEstado.checkIn.ubicacionValida) "✅ Entrada GPS OK" else "⚠️ Fuera de rango"
-                    Text(iconCheck, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (turnoConEstado.checkIn.ubicacionValida) Color(0xFF2E7D32) else Color(0xFFE65100))
-                }
-
-                if (esAdmin) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(
-                            onClick = onEditClick,
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text("✏️ Editar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LavandaPrimary)
-                        }
-
-                        OutlinedButton(
-                            onClick = onDeleteClick,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
-                            border = BorderStroke(1.dp, Color(0xFFC62828)),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text("🗑️ Eliminar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                if (canDelete) {
+                    TextButton(onClick = onEditClick) {
+                        Text("Editar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LavandaPrimary)
+                    }
+                    TextButton(onClick = onDeleteClick) {
+                        Text("Eliminar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            Text(
+                text = "${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = turno.cuidadorNombre,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
-                        color = TextoPrincipalColor
-                    )
-                    Text(
-                        text = "Horario: ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
-                        fontSize = 14.sp,
-                        color = TextoSecundarioColor
-                    )
+                UserAvatar(nombre = cuidadorResult.nombre, size = 32.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    if (cuidadorResult.esReemplazo) {
+                        Text(
+                            text = "🔄 ${cuidadorResult.nombre}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Text(
+                            text = "Titular: ${turno.cuidadorNombre}",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    } else {
+                        Text(
+                            text = cuidadorResult.nombre,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextoPrincipalColor
+                        )
+                    }
                 }
 
                 if (turno.cuidadorTelefono.isNotBlank()) {
-                    IconButton(onClick = { onCallClick(turno.cuidadorTelefono) }) {
-                        Icon(Icons.Default.Call, contentDescription = "Llamar", tint = Color(0xFF2E7D32))
-                    }
-                }
-            }
-
-            // Badges y botones de confirmación de asistencia
-            if (showButtons) {
-                Spacer(modifier = Modifier.height(12.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { onResponderConfirmacion(EstadoConfirmacion.CONFIRMADO, "") },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(48.dp)
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = { onCallClick(turno.cuidadorTelefono) },
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Text("Puedo cubrir este turno", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-
-                    OutlinedButton(
-                        onClick = { showMotivoDialog = true },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
-                        border = BorderStroke(1.5.dp, Color(0xFFC62828)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        Text("No puedo cubrirlo", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                when (turno.confirmacion) {
-                    EstadoConfirmacion.CONFIRMADO -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(8.dp)) {
-                            Text("✅ Confirmado", color = Color(0xFF2E7D32), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
-                        }
-                    }
-                    EstadoConfirmacion.RECHAZADO -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(color = Color(0xFFFFEBEE), shape = RoundedCornerShape(8.dp)) {
-                                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)) {
-                                    Text("❌ Rechazado", color = Color(0xFFC62828), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    if (turno.motivoRechazo.isNotBlank()) {
-                                        Text("Motivo: \"${turno.motivoRechazo}\"", color = Color(0xFFC62828).copy(alpha = 0.8f), fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                            if (esAdmin) {
-                                Spacer(modifier = Modifier.weight(1f))
-                                OutlinedButton(
-                                    onClick = onReasignarClick,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(34.dp)
-                                ) {
-                                    Text("Reasignar", fontSize = 12.sp, color = LavandaPrimary)
-                                }
-                            }
-                        }
-                    }
-                    EstadoConfirmacion.REEMPLAZO_SOLICITADO -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(color = Color(0xFFEDE7F6), shape = RoundedCornerShape(8.dp)) {
-                                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)) {
-                                    Text("🔄 Solicita reemplazo", color = Color(0xFF673AB7), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    if (turno.motivoRechazo.isNotBlank()) {
-                                        Text("Motivo: \"${turno.motivoRechazo}\"", color = Color(0xFF673AB7).copy(alpha = 0.8f), fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                            if (esAdmin) {
-                                Spacer(modifier = Modifier.weight(1f))
-                                OutlinedButton(
-                                    onClick = onReasignarClick,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(34.dp)
-                                ) {
-                                    Text("Reasignar", fontSize = 12.sp, color = LavandaPrimary)
-                                }
-                            }
-                        }
-                    }
-                    EstadoConfirmacion.PENDIENTE -> {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Surface(color = Color(0xFFFFF3E0), shape = RoundedCornerShape(8.dp)) {
-                            Text("⏳ Pendiente", color = Color(0xFFE65100), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
-                        }
+                        Icon(Icons.Default.Call, contentDescription = "Llamar", tint = LavandaPrimary)
                     }
                 }
             }
 
             if (turno.tareas.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    turno.tareas.forEach { tarea ->
-                        Surface(
-                            color = Color(0xFFF5F5F5),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = tarea,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextoPrincipalColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
+                Text("Tareas del turno:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextoPrincipalColor)
+                Spacer(modifier = Modifier.height(4.dp))
+                turno.tareas.forEach { t ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                        Icon(Icons.Default.TaskAlt, contentDescription = null, modifier = Modifier.size(14.dp), tint = LavandaPrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(t, fontSize = 13.sp, color = TextoSecundarioColor)
+                    }
+                }
+            }
+
+            if (showButtons) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { onResponderConfirmacion(EstadoConfirmacion.CONFIRMADO, "") },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(44.dp)
+                    ) {
+                        Text("Confirmar turno", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    OutlinedButton(
+                        onClick = { showMotivoDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("No disponible", fontSize = 13.sp, color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // BOTÓN DE INTERCAMBIO DE TURNO PARA CUIDADOR (48dp de alto)
+            val esMiTurno = (cuidadorResult.userId == currentUserId || turno.cuidadorUserId == currentUserId)
+            if (!esAdmin && esMiTurno && turnoConEstado.fechaStr >= hoyStr) {
+                Spacer(modifier = Modifier.height(12.dp))
+                if (cuidadorResult.tieneSolicitudPendiente && cuidadorResult.solicitudPendiente?.solicitanteUserId == currentUserId) {
+                    OutlinedButton(
+                        onClick = {
+                            cuidadorResult.solicitudPendiente?.let { sol ->
+                                onCancelarSolicitud(sol.id)
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("Cancelar solicitud de cambio", fontSize = 14.sp, color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
+                    }
+                } else if (!cuidadorResult.esReemplazo && !cuidadorResult.tieneSolicitudPendiente) {
+                    Button(
+                        onClick = onSolicitarCambio,
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Solicitar cambio de este turno", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
@@ -1147,40 +1369,262 @@ fun TurnoCard(
     }
 
     if (showMotivoDialog) {
-        MotivoRechazoTurnoDialog(
-            onDismiss = { showMotivoDialog = false },
-            onConfirm = { motivo ->
-                onResponderConfirmacion(EstadoConfirmacion.RECHAZADO, motivo)
-                showMotivoDialog = false
-            }
+        var motivoText by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showMotivoDialog = false },
+            title = { Text("Indica el motivo", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                Column {
+                    Text("Explica brevemente por qué no puedes cubrir este turno:", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = motivoText,
+                        onValueChange = { motivoText = it },
+                        label = { Text("Motivo (opcional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showMotivoDialog = false
+                        onResponderConfirmacion(EstadoConfirmacion.RECHAZADO, motivoText)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Enviar respuesta", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showMotivoDialog = false }, shape = RoundedCornerShape(12.dp)) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }
 
 @Composable
-fun MotivoRechazoTurnoDialog(
-    titulo: String = "No puedo cubrir el turno",
-    subtitulo: String = "Indica un motivo breve para informar al Administrador del grupo (opcional):",
+fun SolicitarCambioDialog(
+    turno: Turno,
+    fechaStr: String,
+    miembros: List<GroupMemberInfo>,
+    currentUserId: String,
+    isSaving: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onSubmit: (motivo: String, tipo: TipoIntercambio, reemplazoId: String, reemplazoNombre: String) -> Unit
 ) {
-    var motivoText by remember { mutableStateOf("") }
+    var motivo by remember { mutableStateOf("") }
+    var tipo by remember { mutableStateOf(TipoIntercambio.CEDER) }
+    var reemplazoId by remember { mutableStateOf("") }
+    var reemplazoNombre by remember { mutableStateOf("") }
+    var errorMotivo by remember { mutableStateOf<String?>(null) }
+
+    val otrosCuidadores = miembros.filter {
+        it.member.role == Role.CUIDADOR_EXTERNO && it.member.userId != currentUserId
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(titulo, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        title = { Text("Solicitar cambio de turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Fecha: $fechaStr (${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)})",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = LavandaPrimary
+                )
+
+                OutlinedTextField(
+                    value = motivo,
+                    onValueChange = {
+                        motivo = it
+                        if (it.isNotBlank()) errorMotivo = null
+                    },
+                    label = { Text("Motivo del cambio (obligatorio)") },
+                    isError = errorMotivo != null,
+                    supportingText = { errorMotivo?.let { Text(it, color = Color.Red) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Text("¿Cómo deseas realizar el cambio?", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = tipo == TipoIntercambio.CEDER,
+                        onClick = { tipo = TipoIntercambio.CEDER }
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Que el Administrador asigne a alguien", fontSize = 13.sp)
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = tipo == TipoIntercambio.PROPONER,
+                        onClick = { tipo = TipoIntercambio.PROPONER }
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Proponer a un cuidador concreto", fontSize = 13.sp)
+                }
+
+                if (tipo == TipoIntercambio.PROPONER) {
+                    Text("Selecciona el cuidador propuesto:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    if (otrosCuidadores.isEmpty()) {
+                        Text("No hay otros cuidadores externos registrados.", fontSize = 12.sp, color = Color.Gray)
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            otrosCuidadores.forEach { memberInfo ->
+                                FilterChip(
+                                    selected = reemplazoId == memberInfo.member.userId,
+                                    onClick = {
+                                        reemplazoId = memberInfo.member.userId
+                                        reemplazoNombre = memberInfo.userName
+                                    },
+                                    label = { Text(memberInfo.userName) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (motivo.isBlank()) {
+                        errorMotivo = "El motivo es obligatorio."
+                        return@Button
+                    }
+                    if (tipo == TipoIntercambio.PROPONER && reemplazoId.isBlank()) {
+                        errorMotivo = "Selecciona un cuidador propuesto."
+                        return@Button
+                    }
+                    onSubmit(motivo, tipo, reemplazoId, reemplazoNombre)
+                },
+                enabled = !isSaving,
+                colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Enviar solicitud", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                Text("Cancelar", color = Color.Gray)
+            }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun AprobarSolicitudDialog(
+    solicitud: SolicitudIntercambio,
+    miembros: List<GroupMemberInfo>,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onAprobar: (reemplazoUserId: String, reemplazoNombre: String) -> Unit
+) {
+    val otrosCuidadores = miembros.filter { it.member.role == Role.CUIDADOR_EXTERNO }
+    var selectedUserId by remember {
+        mutableStateOf(
+            if (solicitud.reemplazoPropuestoUserId.isNotBlank()) solicitud.reemplazoPropuestoUserId
+            else otrosCuidadores.firstOrNull()?.member?.userId ?: ""
+        )
+    }
+    var selectedNombre by remember {
+        mutableStateOf(
+            if (solicitud.reemplazoPropuestoNombre.isNotBlank()) solicitud.reemplazoPropuestoNombre
+            else otrosCuidadores.firstOrNull()?.userName ?: ""
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Aprobar cambio de turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = subtitulo,
-                    fontSize = 13.sp,
-                    color = Color.DarkGray
-                )
+                Text("Solicitante: ${solicitud.solicitanteNombre}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Fecha: ${solicitud.fecha} (${formatHora24(solicitud.horaInicio)} - ${formatHora24(solicitud.horaFin)})", fontSize = 13.sp)
+                Text("Motivo: \"${solicitud.motivo}\"", fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                if (solicitud.tipo == TipoIntercambio.PROPONER && solicitud.reemplazoPropuestoNombre.isNotBlank()) {
+                    Text("Propuesto por el solicitante: ${solicitud.reemplazoPropuestoNombre}", fontSize = 13.sp, color = LavandaPrimary, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Asignar reemplazo a:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                if (otrosCuidadores.isEmpty()) {
+                    Text("No hay otros cuidadores externos disponibles.", fontSize = 12.sp, color = Color.Red)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        otrosCuidadores.forEach { memberInfo ->
+                            FilterChip(
+                                selected = selectedUserId == memberInfo.member.userId,
+                                onClick = {
+                                    selectedUserId = memberInfo.member.userId
+                                    selectedNombre = memberInfo.userName
+                                },
+                                label = { Text(memberInfo.userName) }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (selectedUserId.isNotBlank()) {
+                        onAprobar(selectedUserId, selectedNombre)
+                    }
+                },
+                enabled = !isSaving && selectedUserId.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Aprobar y asignar", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                Text("Cancelar", color = Color.Gray)
+            }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun RechazarSolicitudDialog(
+    solicitud: SolicitudIntercambio,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onRechazar: (motivoRechazo: String) -> Unit
+) {
+    var motivoRechazo by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rechazar solicitud de cambio", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Solicitante: ${solicitud.solicitanteNombre}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Fecha: ${solicitud.fecha} (${formatHora24(solicitud.horaInicio)} - ${formatHora24(solicitud.horaFin)})", fontSize = 13.sp)
+
                 OutlinedTextField(
-                    value = motivoText,
-                    onValueChange = { motivoText = it },
-                    label = { Text("Motivo / Explicación") },
-                    placeholder = { Text("Ej: Inconveniente personal / Conflicto de horario") },
+                    value = motivoRechazo,
+                    onValueChange = { motivoRechazo = it },
+                    label = { Text("Motivo de rechazo (opcional)") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -1188,11 +1632,12 @@ fun MotivoRechazoTurnoDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(motivoText.trim()) },
+                onClick = { onRechazar(motivoRechazo) },
+                enabled = !isSaving,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Enviar Respuesta", fontWeight = FontWeight.Bold)
+                Text("Rechazar solicitud", fontWeight = FontWeight.Bold, color = Color.White)
             }
         },
         dismissButton = {
@@ -1205,67 +1650,281 @@ fun MotivoRechazoTurnoDialog(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReasignarTurnoDialog(
-    miembros: List<GroupMemberInfo>,
-    isSaving: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (GroupMemberInfo) -> Unit
+fun TarjetaRespuestaRecienteAdmin(
+    turno: Turno,
+    onMarcarVisto: () -> Unit,
+    onReasignar: () -> Unit
 ) {
-    var selectedMiembro by remember { mutableStateOf<GroupMemberInfo?>(miembros.firstOrNull { it.member.role == Role.CUIDADOR_EXTERNO } ?: miembros.firstOrNull()) }
+    val esRechazado = turno.confirmacion == EstadoConfirmacion.RECHAZADO
+    val colorBadge = if (esRechazado) Color(0xFFC62828) else Color(0xFF2E7D32)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Schedule, contentDescription = null, tint = LavandaPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Reasignar Turno", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Surface(
+        color = Color(0xFFFAFAFA),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Selecciona el nuevo Cuidador Externo que asumirá este turno:",
-                    fontSize = 13.sp,
-                    color = Color.DarkGray
+                    text = "👤 ${turno.cuidadorNombre}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = TextoPrincipalColor
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    miembros.forEach { m ->
-                        val isSelected = selectedMiembro?.member?.userId == m.member.userId
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedMiembro = m },
-                            label = { Text(m.userName, fontSize = 12.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = LavandaPrimary,
-                                selectedLabelColor = Color.White
-                            )
+
+                Surface(
+                    color = colorBadge.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (esRechazado) "❌ Rechazado" else "✅ Confirmado",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colorBadge,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Horario: ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
+                fontSize = 13.sp,
+                color = TextoSecundarioColor
+            )
+
+            if (esRechazado && turno.motivoRechazo.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Motivo: \"${turno.motivoRechazo}\"", fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = Color(0xFFC62828))
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                if (esRechazado) {
+                    Button(
+                        onClick = onReasignar,
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text("Reasignar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                OutlinedButton(
+                    onClick = onMarcarVisto,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("Marcar visto", fontSize = 12.sp, color = Color.Gray)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TarjetaTurnoPendienteRespuesta(
+    turno: Turno,
+    onConfirmar: () -> Unit,
+    onRechazar: (String) -> Unit,
+    onSolicitarReemplazo: (String) -> Unit
+) {
+    var showRechazarDialog by remember { mutableStateOf(false) }
+
+    Surface(
+        color = Color(0xFFFFF8E1),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color(0xFFFFE082)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "⏰ Horario: ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            if (turno.tareas.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Tareas: ${turno.tareas.joinToString(", ")}", fontSize = 13.sp, color = TextoSecundarioColor)
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onConfirmar,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text("Confirmar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                OutlinedButton(
+                    onClick = { showRechazarDialog = true },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text("No disponible", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
+                }
+            }
+        }
+    }
+
+    if (showRechazarDialog) {
+        var motivoText by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showRechazarDialog = false },
+            title = { Text("Indica el motivo", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                Column {
+                    Text("Explica brevemente por qué no puedes cubrir este turno:", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = motivoText,
+                        onValueChange = { motivoText = it },
+                        label = { Text("Motivo (opcional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRechazarDialog = false
+                        onRechazar(motivoText)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Enviar respuesta", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showRechazarDialog = false }, shape = RoundedCornerShape(12.dp)) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+}
+
+@Composable
+fun BannerDestacadoTurno(
+    userRole: Role,
+    currentUserId: String,
+    viewModel: TurnoViewModel,
+    familyGroupId: String,
+    onRequestLocation: (() -> Unit) -> Unit,
+    fusedLocationClient: FusedLocationProviderClient
+) {
+    val hoyStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    val diasSemanaHoy = viewModel.getDiasDeLaSemanaActual(0).firstOrNull { it.fechaStr == hoyStr }
+
+    if (diasSemanaHoy == null) return
+
+    val turnosDeHoy = viewModel.obtenerTurnosParaDia(diasSemanaHoy)
+    val turnoEnCursoItem = turnosDeHoy.firstOrNull { it.estado == EstadoTurno.EN_CURSO }
+    val esCuidador = userRole == Role.CUIDADOR_EXTERNO
+
+    if (turnoEnCursoItem != null && esCuidador) {
+        val turno = turnoEnCursoItem.turno
+        val checkIn = turnoEnCursoItem.checkIn
+        val context = LocalContext.current
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(2.dp, LavandaPrimary),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Surface(
+                    color = LavandaPrimaryLight,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "⚡ Turno en curso ahora",
+                        color = LavandaPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                if (checkIn != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (checkIn.ubicacionValida) "✅ Entrada registrada por GPS (${checkIn.horaCheckIn})" else "⚠️ Entrada registrada fuera de rango (${checkIn.horaCheckIn})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (checkIn.ubicacionValida) Color(0xFF2E7D32) else Color(0xFFE65100)
                         )
+                    }
+                } else if (turno.cuidadorUserId == currentUserId) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            onRequestLocation {
+                                @SuppressLint("MissingPermission")
+                                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                                    .addOnSuccessListener { loc ->
+                                        if (loc != null) {
+                                            viewModel.registrarCheckIn(familyGroupId, turno.id, currentUserId, loc.latitude, loc.longitude)
+                                        } else {
+                                            Toast.makeText(context, "No se pudo obtener la ubicación GPS actual.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    .addOnFailureListener {
+                                        Toast.makeText(context, "Error obteniendo ubicación GPS.", Toast.LENGTH_SHORT).show()
+                                    }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Registrar entrada por GPS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { selectedMiembro?.let { onConfirm(it) } },
-                enabled = !isSaving && selectedMiembro != null,
-                colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (isSaving) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Text("Reasignar Turno", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar", color = Color.Gray)
-            }
-        },
-        containerColor = Color.White,
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }
 
 @Composable
@@ -1276,19 +1935,19 @@ fun SemanaSelectorBar(
     onSiguienteClick: () -> Unit,
     onResetClick: () -> Unit
 ) {
-    val primerDia = diasSemana.firstOrNull()?.numeroDiaMes ?: 1
-    val ultimoDia = diasSemana.lastOrNull()?.numeroDiaMes ?: 31
-    val mesNombre = SimpleDateFormat("MMM", Locale("es", "ES")).format(Calendar.getInstance().apply {
-        add(Calendar.WEEK_OF_YEAR, offsetSemanas)
-    }.time).replaceFirstChar { it.uppercase() }
+    val primerDia = diasSemana.firstOrNull()
+    val ultimoDia = diasSemana.lastOrNull()
+    val textoRango = if (primerDia != null && ultimoDia != null) {
+        "${primerDia.numeroDiaMes} - ${ultimoDia.numeroDiaMes} ${formatMesEspanol(primerDia.fechaStr)}"
+    } else {
+        "Semana actual"
+    }
 
-    Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(16.dp),
-        shadowElevation = 2.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -1297,534 +1956,462 @@ fun SemanaSelectorBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onAnteriorClick, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ChevronLeft, contentDescription = "Semana Anterior", tint = LavandaPrimary)
+            IconButton(onClick = onAnteriorClick) {
+                Icon(Icons.Default.ChevronLeft, contentDescription = "Semana anterior", tint = LavandaPrimary)
             }
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { if (offsetSemanas != 0) onResetClick() }
+                modifier = Modifier.clickable { onResetClick() }
             ) {
                 Text(
-                    text = "Semana $primerDia - $ultimoDia $mesNombre",
+                    text = if (offsetSemanas == 0) "Semana Actual" else "Semana (${if (offsetSemanas > 0) "+$offsetSemanas" else offsetSemanas})",
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.primary
+                    color = LavandaPrimary
                 )
-                if (offsetSemanas != 0) {
-                    Text(
-                        text = "Volver a esta semana",
-                        fontSize = 10.sp,
-                        color = LavandaPrimary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            IconButton(onClick = onSiguienteClick, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ChevronRight, contentDescription = "Semana Siguiente", tint = LavandaPrimary)
-            }
-        }
-    }
-}
-
-@SuppressLint("MissingPermission")
-@Composable
-fun BannerDestacadoTurno(
-    userRole: Role,
-    currentUserId: String,
-    viewModel: TurnoViewModel,
-    familyGroupId: String,
-    onRequestLocation: ((() -> Unit) -> Unit),
-    fusedLocationClient: FusedLocationProviderClient
-) {
-    val context = LocalContext.current
-    val diasSemana = viewModel.getDiasDeLaSemanaActual()
-    val hoyItem = diasSemana.firstOrNull { it.esHoy } ?: return
-    val turnosHoy = viewModel.obtenerTurnosParaDia(hoyItem)
-
-    if (userRole == Role.CUIDADOR_EXTERNO) {
-        val miTurnoHoy = turnosHoy.firstOrNull { it.turno.cuidadorUserId == currentUserId } ?: return
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(2.dp, Color(0xFF7C4DFF)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = Color(0xFF7C4DFF),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = "● Turno en Curso",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = "${formatHora24(miTurnoHoy.turno.horaInicio)} - ${formatHora24(miTurnoHoy.turno.horaFin)}",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp,
-                        color = Color(0xFF7C4DFF)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
                 Text(
-                    text = "Hola, ${miTurnoHoy.turno.cuidadorNombre}",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    text = textoRango,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     color = TextoPrincipalColor
                 )
-
-                if (miTurnoHoy.turno.tareas.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("Tareas asignadas:", fontSize = 13.sp, color = TextoSecundarioColor, fontWeight = FontWeight.SemiBold)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(top = 4.dp)
-                    ) {
-                        miTurnoHoy.turno.tareas.forEach { t ->
-                            Surface(
-                                color = LavandaPrimaryLight,
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(t, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LavandaPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                val checkIn = miTurnoHoy.checkIn
-                if (checkIn == null) {
-                    Button(
-                        onClick = {
-                            onRequestLocation {
-                                try {
-                                    fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                                        .addOnSuccessListener { loc ->
-                                            if (loc != null) {
-                                                viewModel.registrarCheckIn(familyGroupId, miTurnoHoy.turno.id, currentUserId, loc.latitude, loc.longitude)
-                                            } else {
-                                                Toast.makeText(context, "No se pudo obtener la ubicación GPS.", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Error al consultar GPS.", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Marcar Llegada (GPS)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-                } else {
-                    if (checkIn.ubicacionValida) {
-                        Surface(
-                            color = Color(0xFFE8F5E9),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFFA5D6A7)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF2E7D32))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text("✅ Entrada Validada por Ubicación", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2E7D32))
-                                    Text("Hora check-in: ${checkIn.horaCheckIn}", fontSize = 12.sp, color = TextoSecundarioColor)
-                                }
-                            }
-                        }
-                    } else {
-                        Surface(
-                            color = Color(0xFFFFF3E0),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFFE082)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFFE65100))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text("⚠️ Entrada Registrada fuera de Rango", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE65100))
-                                    Text("Hora check-in: ${checkIn.horaCheckIn} (Ubicación a >150m del domicilio)", fontSize = 12.sp, color = TextoSecundarioColor)
-                                }
-                            }
-                        }
-                    }
-                }
             }
-        }
-    } else {
-        val turnoEnCurso = turnosHoy.firstOrNull { it.estado == EstadoTurno.EN_CURSO } ?: return
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.2f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(LavandaPrimaryLight, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.TaskAlt, contentDescription = null, tint = LavandaPrimary)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Turno en curso hoy", fontSize = 12.sp, color = TextoSecundarioColor, fontWeight = FontWeight.Bold)
-                    Text(turnoEnCurso.turno.cuidadorNombre, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = TextoPrincipalColor)
-                    Text("${formatHora24(turnoEnCurso.turno.horaInicio)} - ${formatHora24(turnoEnCurso.turno.horaFin)}", fontSize = 13.sp, color = LavandaPrimary)
-                }
-
-                if (turnoEnCurso.turno.cuidadorTelefono.isNotBlank()) {
-                    IconButton(
-                        onClick = {
-                            try {
-                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${turnoEnCurso.turno.cuidadorTelefono}"))
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "No se pudo realizar la llamada", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Icon(Icons.Default.Call, contentDescription = "Llamar", tint = Color(0xFF2E7D32))
-                    }
-                }
+            IconButton(onClick = onSiguienteClick) {
+                Icon(Icons.Default.ChevronRight, contentDescription = "Semana siguiente", tint = LavandaPrimary)
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CrearTurnoDialog(
     miembros: List<GroupMemberInfo>,
-    initialTurno: Turno? = null,
+    initialTurno: Turno?,
+    initialTarifa: Double? = null,
+    puedeVerFinanzas: Boolean = false,
     isSaving: Boolean,
     onDismiss: () -> Unit,
-    onCrear: (String, String, String, List<Int>, String, String, List<String>, Long, Long?) -> Unit
+    onCrear: (
+        cuidadorUserId: String,
+        cuidadorNombre: String,
+        cuidadorTelefono: String,
+        diasSemana: List<Int>,
+        horaInicio: String,
+        horaFin: String,
+        tareas: List<String>,
+        fechaInicio: Long,
+        fechaFin: Long?,
+        tarifaPorHora: Double?
+    ) -> Unit
 ) {
-    val context = LocalContext.current
-    var selectedMiembro by remember {
+    val cuidadores = miembros.filter { it.member.role == Role.CUIDADOR_EXTERNO }
+
+    var selectedUserId by remember { mutableStateOf(initialTurno?.cuidadorUserId ?: (cuidadores.firstOrNull()?.member?.userId ?: "")) }
+    var selectedNombre by remember { mutableStateOf(initialTurno?.cuidadorNombre ?: (cuidadores.firstOrNull()?.userName ?: "")) }
+    var selectedTelefono by remember { mutableStateOf(initialTurno?.cuidadorTelefono ?: "") }
+
+    var selectedDias by remember { mutableStateOf(initialTurno?.diasSemana ?: listOf(2, 3, 4, 5, 6)) }
+    var horaInicio by remember { mutableStateOf(initialTurno?.horaInicio ?: "08:00") }
+    var horaFin by remember { mutableStateOf(initialTurno?.horaFin ?: "16:00") }
+    var tareasText by remember { mutableStateOf(initialTurno?.tareas?.joinToString("\n") ?: "") }
+
+    var tarifaText by remember {
         mutableStateOf(
-            miembros.firstOrNull { it.member.userId == initialTurno?.cuidadorUserId }
-                ?: miembros.firstOrNull { it.member.role == Role.CUIDADOR_EXTERNO }
-                ?: miembros.firstOrNull()
-        )
-    }
-    var telefonoText by remember { mutableStateOf(initialTurno?.cuidadorTelefono ?: "") }
-
-    val diasOpciones = listOf(
-        Pair("L", 2),
-        Pair("M", 3),
-        Pair("X", 4),
-        Pair("J", 5),
-        Pair("V", 6),
-        Pair("S", 7),
-        Pair("D", 1)
-    )
-
-    var selectedDias by remember {
-        mutableStateOf(initialTurno?.diasSemana?.toSet() ?: setOf(2, 3, 4, 5, 6))
-    }
-
-    var presetSeleccionado by remember {
-        mutableStateOf(
-            when {
-                initialTurno?.horaInicio == "9:00" && initialTurno.horaFin == "14:00" -> "MANANA"
-                initialTurno?.horaInicio == "15:00" && initialTurno.horaFin == "20:00" -> "TARDE"
-                initialTurno?.horaInicio == "20:00" && initialTurno.horaFin == "8:00" -> "NOCHE"
-                initialTurno != null -> "CUSTOM"
-                else -> "MANANA"
-            }
+            if (initialTarifa != null && initialTarifa > 0.0)
+                DecimalFormat("0.00", DecimalFormatSymbols(Locale.US)).format(initialTarifa)
+            else ""
         )
     }
 
-    var horaInicioCustom by remember {
-        mutableStateOf(
-            try { LocalTime.parse(initialTurno?.horaInicio) } catch (e: Exception) { LocalTime.of(9, 0) }
-        )
-    }
-    var horaFinCustom by remember {
-        mutableStateOf(
-            try { LocalTime.parse(initialTurno?.horaFin) } catch (e: Exception) { LocalTime.of(14, 0) }
-        )
-    }
+    var fechaInicioMs by remember { mutableStateOf(initialTurno?.fechaInicio ?: 0L) }
+    var fechaFinMs by remember { mutableStateOf<Long?>(initialTurno?.fechaFin) }
 
-    val tareasOpciones = listOf("Medicación", "Paseo", "Almuerzo", "Higiene", "Cita Médica", "Presión")
-    var selectedTareas by remember {
-        mutableStateOf(initialTurno?.tareas?.toSet() ?: setOf("Medicación", "Almuerzo"))
-    }
+    var showHoraIniPicker by remember { mutableStateOf(false) }
+    var showHoraFinPicker by remember { mutableStateOf(false) }
+    var showFechaInicioDialog by remember { mutableStateOf(false) }
+    var showFechaFinDialog by remember { mutableStateOf(false) }
 
-    var fechaInicioLocalDate by remember {
-        mutableStateOf(
-            if (initialTurno != null && initialTurno.fechaInicio > 0L) {
-                Instant.ofEpochMilli(initialTurno.fechaInicio).atZone(ZoneOffset.UTC).toLocalDate()
-            } else {
-                LocalDate.now()
-            }
-        )
-    }
+    val diasLabels = listOf("L", "M", "X", "J", "V", "S", "D")
+    val diasValues = listOf(2, 3, 4, 5, 6, 7, 1)
 
-    var fechaFinLocalDate by remember {
-        mutableStateOf<LocalDate?>(
-            if (initialTurno?.fechaFin != null && initialTurno.fechaFin > 0L) {
-                Instant.ofEpochMilli(initialTurno.fechaFin).atZone(ZoneOffset.UTC).toLocalDate()
-            } else {
-                null
-            }
-        )
-    }
-
-    var sinFechaFin by remember {
-        mutableStateOf(initialTurno == null || initialTurno.fechaFin == null || initialTurno.fechaFin == 0L)
-    }
-
-    var showDesdeDatePicker by remember { mutableStateOf(false) }
-    var showHastaDatePicker by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Schedule, contentDescription = null, tint = LavandaPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (initialTurno != null) "Editar Turno" else "Asignar Nuevo Turno",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            }
-        },
-        text = {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+        ) {
             Column(
                 modifier = Modifier
+                    .padding(20.dp)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Column {
-                    Text("Selecciona el Cuidador:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        miembros.forEach { m ->
-                            val isSelected = selectedMiembro?.member?.userId == m.member.userId
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedMiembro = m },
-                                label = { Text(m.userName, fontSize = 12.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = LavandaPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = telefonoText,
-                    onValueChange = { telefonoText = it },
-                    label = { Text("Teléfono de Contacto (opcional)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                Text(
+                    text = if (initialTurno == null) "Asignar Nuevo Turno" else "Editar Turno",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.primary
                 )
 
-                // Rango de Fechas (Desde - Hasta)
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Rango de Vigencia del Turno:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.weight(1f))
-                        TextButton(
-                            onClick = {
-                                val hoy = LocalDate.now()
-                                fechaInicioLocalDate = hoy
-                                fechaFinLocalDate = hoy
-                                sinFechaFin = false
-
-                                val calendarDayOfWeek = when (hoy.dayOfWeek) {
-                                    DayOfWeek.SUNDAY -> 1
-                                    DayOfWeek.MONDAY -> 2
-                                    DayOfWeek.TUESDAY -> 3
-                                    DayOfWeek.WEDNESDAY -> 4
-                                    DayOfWeek.THURSDAY -> 5
-                                    DayOfWeek.FRIDAY -> 6
-                                    DayOfWeek.SATURDAY -> 7
-                                }
-                                selectedDias = setOf(calendarDayOfWeek)
-                            }
-                        ) {
-                            Text("Solo este día", fontSize = 11.sp, color = LavandaPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
+                    Text("Selecciona el Cuidador:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextoPrincipalColor)
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = formatFechaEspanolCorta(fechaInicioLocalDate),
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Desde") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { showDesdeDatePicker = true },
-                            enabled = false,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                disabledBorderColor = Color.Gray,
-                                disabledTextColor = TextoPrincipalColor
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        if (!sinFechaFin) {
-                            OutlinedTextField(
-                                value = fechaFinLocalDate?.let { formatFechaEspanolCorta(it) } ?: "Elegir fecha",
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Hasta") },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { showHastaDatePicker = true },
-                                enabled = false,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    disabledBorderColor = Color.Gray,
-                                    disabledTextColor = TextoPrincipalColor
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            )
+                    if (cuidadores.isEmpty()) {
+                        Text("No hay cuidadores externos en el grupo familiar.", fontSize = 12.sp, color = Color.Red)
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            cuidadores.forEach { memberInfo ->
+                                FilterChip(
+                                    selected = selectedUserId == memberInfo.member.userId,
+                                    onClick = {
+                                        selectedUserId = memberInfo.member.userId
+                                        selectedNombre = memberInfo.userName
+                                    },
+                                    label = { Text(memberInfo.userName) }
+                                )
+                            }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Repetir indefinidamente (sin fecha final)", fontSize = 12.sp, color = TextoSecundarioColor)
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = sinFechaFin,
-                            onCheckedChange = { isChecked ->
-                                sinFechaFin = isChecked
-                                if (isChecked) {
-                                    fechaFinLocalDate = null
-                                } else if (fechaFinLocalDate == null) {
-                                    fechaFinLocalDate = fechaInicioLocalDate
-                                }
-                            },
-                            colors = SwitchDefaults.colors(checkedThumbColor = LavandaPrimary)
-                        )
                     }
                 }
 
+                // Campo 'Tarifa por hora (S/)' SOLO para quien tenga puedeVerFinanzas
+                if (puedeVerFinanzas) {
+                    OutlinedTextField(
+                        value = tarifaText,
+                        onValueChange = { input ->
+                            if (input.isBlank() || input.matches(Regex("""^\d*(\.\d{0,2})?$"""))) {
+                                tarifaText = input
+                            }
+                        },
+                        label = { Text("Tarifa por hora (S/)") },
+                        prefix = { Text("S/ ", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
                 Column {
-                    Text("Días de la semana:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Días de trabajo semanales:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextoPrincipalColor)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        diasOpciones.forEach { (letra, dayNum) ->
-                            val isSel = selectedDias.contains(dayNum)
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isSel) LavandaPrimary else Color(0xFFF5F5F5))
-                                    .clickable {
-                                        selectedDias = if (isSel) selectedDias - dayNum else selectedDias + dayNum
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(letra, color = if (isSel) Color.White else Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
+                        diasLabels.forEachIndexed { idx, label ->
+                            val dayVal = diasValues[idx]
+                            val isSel = selectedDias.contains(dayVal)
+                            FilterChip(
+                                selected = isSel,
+                                onClick = {
+                                    selectedDias = if (isSel) selectedDias.filter { it != dayVal } else selectedDias + dayVal
+                                },
+                                label = { Text(label, fontSize = 12.sp) }
+                            )
                         }
                     }
                 }
 
-                Column {
-                    Text("Horario:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = presetSeleccionado == "MANANA",
-                            onClick = { presetSeleccionado = "MANANA" },
-                            label = { Text("☀️ Mañana (9:00 - 14:00)", fontSize = 12.sp) }
-                        )
-                        FilterChip(
-                            selected = presetSeleccionado == "TARDE",
-                            onClick = { presetSeleccionado = "TARDE" },
-                            label = { Text("🌇 Tarde (15:00 - 20:00)", fontSize = 12.sp) }
-                        )
-                        FilterChip(
-                            selected = presetSeleccionado == "NOCHE",
-                            onClick = { presetSeleccionado = "NOCHE" },
-                            label = { Text("🌙 Noche (20:00 - 8:00)", fontSize = 12.sp) }
-                        )
-                        FilterChip(
-                            selected = presetSeleccionado == "CUSTOM",
-                            onClick = { presetSeleccionado = "CUSTOM" },
-                            label = { Text("Personalizado", fontSize = 12.sp) }
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showHoraIniPicker = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Entrada: ${formatHora24(horaInicio)}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    if (presetSeleccionado == "CUSTOM") {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text("Hora de Inicio:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        WheelTimePicker(horaInicial = horaInicioCustom, onTimeChanged = { horaInicioCustom = it })
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text("Hora de Término:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        WheelTimePicker(horaInicial = horaFinCustom, onTimeChanged = { horaFinCustom = it })
+                    OutlinedButton(
+                        onClick = { showHoraFinPicker = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Salida: ${formatHora24(horaFin)}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                Column {
-                    Text("Tareas del Turno:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        tareasOpciones.forEach { tarea ->
-                            val isSel = selectedTareas.contains(tarea)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    val fIniText = if (fechaInicioMs > 0L) formatFechaMs(fechaInicioMs) else "Sin inicio"
+                    OutlinedButton(
+                        onClick = { showFechaInicioDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Inicio: $fIniText", fontSize = 12.sp)
+                    }
+
+                    val fFinText = if (fechaFinMs != null && fechaFinMs!! > 0L) formatFechaMs(fechaFinMs!!) else "Sin fin"
+                    OutlinedButton(
+                        onClick = { showFechaFinDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Fin: $fFinText", fontSize = 12.sp)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = tareasText,
+                    onValueChange = { tareasText = it },
+                    label = { Text("Tareas o instrucciones del turno (una por línea)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Button(
+                        onClick = {
+                            val tareasList = tareasText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+                            val tarifaVal = tarifaText.toDoubleOrNull()
+                            onCrear(
+                                selectedUserId,
+                                selectedNombre,
+                                selectedTelefono,
+                                selectedDias,
+                                horaInicio,
+                                horaFin,
+                                tareasList,
+                                fechaInicioMs,
+                                fechaFinMs,
+                                tarifaVal
+                            )
+                        },
+                        enabled = !isSaving && selectedUserId.isNotBlank() && selectedDias.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Guardar Turno", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showHoraIniPicker) {
+        Dialog(onDismissRequest = { showHoraIniPicker = false }) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp), modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Hora de Entrada", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = LavandaPrimary)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    var tempTime by remember { mutableStateOf(LocalTime.of(8, 0)) }
+                    WheelTimePicker(horaInicial = tempTime) { tempTime = it }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            horaInicio = tempTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+                            showHoraIniPicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Aceptar", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showHoraFinPicker) {
+        Dialog(onDismissRequest = { showHoraFinPicker = false }) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp), modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Hora de Salida", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = LavandaPrimary)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    var tempTime by remember { mutableStateOf(LocalTime.of(16, 0)) }
+                    WheelTimePicker(horaInicial = tempTime) { tempTime = it }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            horaFin = tempTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+                            showHoraFinPicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Aceptar", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showFechaInicioDialog) {
+        SelectorFechaDialog(
+            fechaInicial = if (fechaInicioMs > 0L) Instant.ofEpochMilli(fechaInicioMs).atZone(ZoneOffset.UTC).toLocalDate() else LocalDate.now(),
+            titulo = "Fecha de inicio del turno",
+            onFechaSeleccionada = { fecha ->
+                fechaInicioMs = fecha.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                showFechaInicioDialog = false
+            },
+            onCancelar = { showFechaInicioDialog = false }
+        )
+    }
+
+    if (showFechaFinDialog) {
+        SelectorFechaDialog(
+            fechaInicial = if (fechaFinMs != null && fechaFinMs!! > 0L) Instant.ofEpochMilli(fechaFinMs!!).atZone(ZoneOffset.UTC).toLocalDate() else LocalDate.now(),
+            titulo = "Fecha de fin del turno (opcional)",
+            onFechaSeleccionada = { fecha ->
+                fechaFinMs = fecha.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                showFechaFinDialog = false
+            },
+            onCancelar = { showFechaFinDialog = false }
+        )
+    }
+}
+
+@Composable
+fun ConfigurarDomicilioDialog(
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onRequestLocation: (() -> Unit) -> Unit,
+    fusedLocationClient: FusedLocationProviderClient,
+    onGuardar: (Double, Double) -> Unit
+) {
+    val context = LocalContext.current
+    var latText by remember { mutableStateOf("") }
+    var lngText by remember { mutableStateOf("") }
+    var isObtainingGps by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Configurar Domicilio", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Establece las coordenadas GPS del domicilio para validar el Check-In de los cuidadores.", fontSize = 13.sp, color = TextoSecundarioColor)
+
+                Button(
+                    onClick = {
+                        onRequestLocation {
+                            isObtainingGps = true
+                            @SuppressLint("MissingPermission")
+                            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                                .addOnSuccessListener { loc ->
+                                    isObtainingGps = false
+                                    if (loc != null) {
+                                        latText = loc.latitude.toString()
+                                        lngText = loc.longitude.toString()
+                                        Toast.makeText(context, "Ubicación GPS capturada.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "No se pudo obtener la ubicación GPS.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    isObtainingGps = false
+                                    Toast.makeText(context, "Error obteniendo ubicación.", Toast.LENGTH_SHORT).show()
+                                }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isObtainingGps) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp))
+                    } else {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Usar mi ubicación GPS actual", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = latText,
+                    onValueChange = { latText = it },
+                    label = { Text("Latitud") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                OutlinedTextField(
+                    value = lngText,
+                    onValueChange = { lngText = it },
+                    label = { Text("Longitud") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val lat = latText.toDoubleOrNull()
+                    val lng = lngText.toDoubleOrNull()
+                    if (lat != null && lng != null) {
+                        onGuardar(lat, lng)
+                    } else {
+                        Toast.makeText(context, "Ingresa coordenadas válidas.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                enabled = !isSaving,
+                colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Guardar Domicilio", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                Text("Cancelar", color = Color.Gray)
+            }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun ReasignarTurnoDialog(
+    turno: Turno,
+    miembros: List<GroupMemberInfo>,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onReasignar: (nuevoUserId: String, nuevoNombre: String, nuevoTelefono: String) -> Unit
+) {
+    val cuidadores = miembros.filter { it.member.role == Role.CUIDADOR_EXTERNO && it.member.userId != turno.cuidadorUserId }
+
+    var selectedUserId by remember { mutableStateOf(cuidadores.firstOrNull()?.member?.userId ?: "") }
+    var selectedNombre by remember { mutableStateOf(cuidadores.firstOrNull()?.userName ?: "") }
+    var selectedTel by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reasignar Turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Horario: ${formatHora24(turno.horaInicio)} - ${formatHora24(turno.horaFin)}", fontSize = 13.sp, color = TextoSecundarioColor)
+                Text("Cuidador actual: ${turno.cuidadorNombre}", fontSize = 13.sp, color = TextoPrincipalColor)
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Selecciona el nuevo Cuidador:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                if (cuidadores.isEmpty()) {
+                    Text("No hay otros cuidadores externos en el grupo.", fontSize = 12.sp, color = Color.Red)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        cuidadores.forEach { memberInfo ->
                             FilterChip(
-                                selected = isSel,
+                                selected = selectedUserId == memberInfo.member.userId,
                                 onClick = {
-                                    selectedTareas = if (isSel) selectedTareas - tarea else selectedTareas + tarea
+                                    selectedUserId = memberInfo.member.userId
+                                    selectedNombre = memberInfo.userName
                                 },
-                                label = { Text(tarea, fontSize = 12.sp) }
+                                label = { Text(memberInfo.userName) }
                             )
                         }
                     }
@@ -1834,51 +2421,15 @@ fun CrearTurnoDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (selectedDias.isEmpty()) {
-                        Toast.makeText(context, "Selecciona al menos un día de la semana", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-
-                    if (!sinFechaFin && fechaFinLocalDate != null) {
-                        if (fechaFinLocalDate!!.isBefore(fechaInicioLocalDate)) {
-                            Toast.makeText(context, "La fecha de fin debe ser mayor o igual a la de inicio", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                    }
-
-                    val (hIniStr, hFinStr) = when (presetSeleccionado) {
-                        "MANANA" -> Pair("9:00", "14:00")
-                        "TARDE" -> Pair("15:00", "20:00")
-                        "NOCHE" -> Pair("20:00", "8:00")
-                        else -> Pair(
-                            String.format(Locale.US, "%d:%02d", horaInicioCustom.hour, horaInicioCustom.minute),
-                            String.format(Locale.US, "%d:%02d", horaFinCustom.hour, horaFinCustom.minute)
-                        )
-                    }
-
-                    val fInicioMs = fechaInicioLocalDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-                    val fFinMs = if (sinFechaFin || fechaFinLocalDate == null) null else fechaFinLocalDate!!.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-
-                    selectedMiembro?.let { m ->
-                        onCrear(
-                            m.member.userId,
-                            m.userName,
-                            telefonoText,
-                            selectedDias.toList(),
-                            hIniStr,
-                            hFinStr,
-                            selectedTareas.toList(),
-                            fInicioMs,
-                            fFinMs
-                        )
+                    if (selectedUserId.isNotBlank()) {
+                        onReasignar(selectedUserId, selectedNombre, selectedTel)
                     }
                 },
-                enabled = !isSaving && selectedMiembro != null && selectedDias.isNotEmpty(),
+                enabled = !isSaving && selectedUserId.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                if (isSaving) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Text(if (initialTurno != null) "Guardar Cambios" else "Asignar Turno", fontWeight = FontWeight.Bold)
+                Text("Reasignar", fontWeight = FontWeight.Bold, color = Color.White)
             }
         },
         dismissButton = {
@@ -1889,151 +2440,26 @@ fun CrearTurnoDialog(
         containerColor = Color.White,
         shape = RoundedCornerShape(20.dp)
     )
+}
 
-    if (showDesdeDatePicker) {
-        SelectorFechaDialog(
-            fechaInicial = fechaInicioLocalDate,
-            titulo = "Seleccionar fecha de inicio",
-            onFechaSeleccionada = { nuevaFecha ->
-                fechaInicioLocalDate = nuevaFecha
-                if (!sinFechaFin && (fechaFinLocalDate == null || fechaFinLocalDate!!.isBefore(nuevaFecha))) {
-                    fechaFinLocalDate = nuevaFecha
-                }
-                showDesdeDatePicker = false
-            },
-            onCancelar = { showDesdeDatePicker = false }
-        )
-    }
+fun formatHora24(horaStr: String): String {
+    if (horaStr.isBlank()) return ""
+    return horaStr.padStart(5, '0')
+}
 
-    if (showHastaDatePicker) {
-        SelectorFechaDialog(
-            fechaInicial = fechaFinLocalDate ?: fechaInicioLocalDate,
-            titulo = "Seleccionar fecha de término",
-            fechaMinima = fechaInicioLocalDate,
-            onFechaSeleccionada = { nuevaFecha ->
-                fechaFinLocalDate = nuevaFecha
-                showHastaDatePicker = false
-            },
-            onCancelar = { showHastaDatePicker = false }
-        )
+fun formatMesEspanol(fechaStr: String): String {
+    if (fechaStr.isBlank()) return ""
+    return try {
+        val sdfIn = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val date = sdfIn.parse(fechaStr) ?: Date()
+        val sdfOut = SimpleDateFormat("MMM", Locale("es", "ES"))
+        sdfOut.format(date).replace(".", "").replaceFirstChar { it.uppercase() }
+    } catch (e: Exception) {
+        ""
     }
 }
 
-@SuppressLint("MissingPermission")
-@Composable
-fun ConfigurarDomicilioDialog(
-    currentLat: Double?,
-    currentLng: Double?,
-    isSaving: Boolean,
-    onDismiss: () -> Unit,
-    onRequestLocation: ((() -> Unit) -> Unit),
-    fusedLocationClient: FusedLocationProviderClient,
-    onGuardar: (Double, Double) -> Unit
-) {
-    val context = LocalContext.current
-    var latCaptured by remember { mutableStateOf(currentLat) }
-    var lngCaptured by remember { mutableStateOf(currentLng) }
-    var isCapturing by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.HomeWork, contentDescription = null, tint = LavandaPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Configurar Domicilio", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    text = "Captura la ubicación GPS de referencia de la casa del adulto mayor. Esta posición se utilizará para validar la llegada del cuidador (<150m).",
-                    fontSize = 13.sp,
-                    color = Color.DarkGray
-                )
-
-                Surface(
-                    color = LavandaPrimaryLight,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if (latCaptured != null && lngCaptured != null) {
-                            Text("Ubicación Referencia GPS:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("Lat: $latCaptured", fontSize = 12.sp, color = Color.Gray)
-                            Text("Lng: $lngCaptured", fontSize = 12.sp, color = Color.Gray)
-                        } else {
-                            Text("Sin ubicación de domicilio registrada", fontSize = 13.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        isCapturing = true
-                        onRequestLocation {
-                            try {
-                                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                                    .addOnSuccessListener { loc ->
-                                        isCapturing = false
-                                        if (loc != null) {
-                                            latCaptured = loc.latitude
-                                            lngCaptured = loc.longitude
-                                        } else {
-                                            Toast.makeText(context, "No se pudo obtener la posición GPS actual.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    .addOnFailureListener {
-                                        isCapturing = false
-                                        Toast.makeText(context, "Error leyendo GPS.", Toast.LENGTH_SHORT).show()
-                                    }
-                            } catch (e: Exception) {
-                                isCapturing = false
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isCapturing) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Capturar GPS de Casa Ahora", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (latCaptured != null && lngCaptured != null) {
-                        onGuardar(latCaptured!!, lngCaptured!!)
-                    }
-                },
-                enabled = !isSaving && latCaptured != null && lngCaptured != null,
-                colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (isSaving) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Text("Guardar Domicilio", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar", color = Color.Gray)
-            }
-        },
-        containerColor = Color.White,
-        shape = RoundedCornerShape(20.dp)
-    )
+fun formatFechaMs(ms: Long): String {
+    if (ms <= 0L) return ""
+    return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(ms))
 }

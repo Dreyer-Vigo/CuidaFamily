@@ -11,6 +11,18 @@ enum class EstadoTurno(val etiqueta: String) {
     COMPLETADO("Completado")
 }
 
+enum class TipoIntercambio {
+    CEDER,    // El Administrador elige quién cubre
+    PROPONER  // Propone a un cuidador concreto
+}
+
+enum class EstadoSolicitud {
+    PENDIENTE,
+    APROBADA,
+    RECHAZADA,
+    CANCELADA
+}
+
 data class Turno(
     val id: String = "",
     val familyGroupId: String = "",
@@ -86,5 +98,89 @@ data class TurnoCheckIn(
     val horaCheckIn: String = "",
     val ubicacionValida: Boolean = false,
     val latitudCapturada: Double = 0.0,
-    val longitudCapturada: Double = 0.0
+    val longitudCapturada: Double = 0.0,
+    val manual: Boolean = false,
+    val noCumplido: Boolean = false,
+    val registradoPorUserId: String = "",
+    val registradoPorNombre: String = ""
 )
+
+data class SolicitudIntercambio(
+    val id: String = "",
+    val familyGroupId: String = "",
+    val turnoId: String = "",
+    val fecha: String = "", // "yyyy-MM-dd"
+    val horaInicio: String = "",
+    val horaFin: String = "",
+    val solicitanteUserId: String = "",
+    val solicitanteNombre: String = "",
+    val tipo: TipoIntercambio = TipoIntercambio.CEDER,
+    val reemplazoPropuestoUserId: String = "",
+    val reemplazoPropuestoNombre: String = "",
+    val motivo: String = "",
+    val estado: EstadoSolicitud = EstadoSolicitud.PENDIENTE,
+    val resueltaPorUserId: String = "",
+    val resueltaPorNombre: String = "",
+    val fechaResolucion: Long = 0L,
+    val motivoRechazo: String = "",
+    val fechaCreacion: Long = System.currentTimeMillis(),
+    val vistaPorSolicitante: Boolean = true,
+    val vistaPorAdmin: Boolean = false
+)
+
+data class ExcepcionTurno(
+    val id: String = "", // DETERMINISTA "${turnoId}_${yyyyMMdd}"
+    val familyGroupId: String = "",
+    val turnoId: String = "",
+    val fecha: String = "", // "yyyy-MM-dd"
+    val cuidadorOriginalUserId: String = "",
+    val cuidadorOriginalNombre: String = "",
+    val cuidadorReemplazoUserId: String = "",
+    val cuidadorReemplazoNombre: String = "",
+    val solicitudId: String = "",
+    val confirmacion: EstadoConfirmacion = EstadoConfirmacion.PENDIENTE,
+    val vistaPorReemplazo: Boolean = false
+)
+
+data class CuidadorEnFechaResult(
+    val userId: String,
+    val nombre: String,
+    val esReemplazo: Boolean = false,
+    val excepcion: ExcepcionTurno? = null,
+    val tieneSolicitudPendiente: Boolean = false,
+    val solicitudPendiente: SolicitudIntercambio? = null
+)
+
+fun cuidadorEnFecha(
+    turno: Turno,
+    fecha: LocalDate,
+    excepciones: List<ExcepcionTurno> = emptyList(),
+    solicitudes: List<SolicitudIntercambio> = emptyList()
+): CuidadorEnFechaResult {
+    val fechaIso = fecha.toString()
+
+    val exc = excepciones.firstOrNull {
+        it.turnoId == turno.id && it.fecha == fechaIso && it.confirmacion != EstadoConfirmacion.RECHAZADO
+    }
+
+    if (exc != null) {
+        return CuidadorEnFechaResult(
+            userId = exc.cuidadorReemplazoUserId,
+            nombre = exc.cuidadorReemplazoNombre,
+            esReemplazo = true,
+            excepcion = exc
+        )
+    }
+
+    val solPendiente = solicitudes.firstOrNull {
+        it.turnoId == turno.id && it.fecha == fechaIso && it.estado == EstadoSolicitud.PENDIENTE
+    }
+
+    return CuidadorEnFechaResult(
+        userId = turno.cuidadorUserId,
+        nombre = turno.cuidadorNombre,
+        esReemplazo = false,
+        tieneSolicitudPendiente = solPendiente != null,
+        solicitudPendiente = solPendiente
+    )
+}

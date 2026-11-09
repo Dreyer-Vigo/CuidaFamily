@@ -1,12 +1,12 @@
 package com.example.cuidafamily.ui.patient
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,18 +14,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,20 +36,23 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.filled.Cake
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ContactEmergency
-import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.HistoryEdu
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MedicalInformation
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -58,9 +64,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -85,12 +94,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.cuidafamily.model.Allergy
 import com.example.cuidafamily.model.Patient
@@ -99,28 +110,43 @@ import com.example.cuidafamily.model.Severidad
 import com.example.cuidafamily.model.calcularEdad
 import com.example.cuidafamily.repository.PatientRepository
 import com.example.cuidafamily.repository.Result
+import com.example.cuidafamily.ui.sos.SosFloatingButton
 import com.example.cuidafamily.ui.theme.AmbarAlerta
-import com.example.cuidafamily.ui.theme.AmbarAlertaFondo
+import com.example.cuidafamily.ui.theme.GradientEnd
+import com.example.cuidafamily.ui.theme.GradientStart
 import com.example.cuidafamily.ui.theme.LavandaPrimary
 import com.example.cuidafamily.ui.theme.LavandaPrimaryLight
 import com.example.cuidafamily.ui.theme.RojoAlerta
 import com.example.cuidafamily.ui.theme.RojoAlertaFondo
+import com.example.cuidafamily.ui.theme.TextoPrincipalColor
 import com.example.cuidafamily.ui.theme.TextoSecundario
-import com.example.cuidafamily.ui.util.GradientButton
+import com.example.cuidafamily.ui.util.AppBackgroundDecorated
+import com.example.cuidafamily.ui.util.NOMBRES_MESES_ESP
+import com.example.cuidafamily.ui.util.SelectorFechaDialog
 import com.example.cuidafamily.ui.util.UserAvatar
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.text.SimpleDateFormat
-import java.util.Calendar
+import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.FolderShared
-import com.example.cuidafamily.ui.sos.SosFloatingButton
 
 /**
- * Contenedor principal de la pantalla de Ficha Médica.
- * Administra el estado de carga y determina la vista activa (Estado Vacío, Formulario de Registro/Edición o Vista de Detalles).
+ * Requerimiento 3: Muestra la fecha de nacimiento formateada en español.
+ * Ejemplo: "18 de marzo de 1948"
  */
+fun formatFechaNacimientoEspanol(fechaIso: String): String {
+    if (fechaIso.isBlank()) return "Seleccionar fecha de nacimiento"
+    return try {
+        val date = LocalDate.parse(fechaIso)
+        val mesNombre = NOMBRES_MESES_ESP[date.monthValue - 1].lowercase()
+        "${date.dayOfMonth} de $mesNombre de ${date.year}"
+    } catch (e: Exception) {
+        fechaIso
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PatientScreenContainer(
@@ -130,37 +156,24 @@ fun PatientScreenContainer(
     userName: String,
     onBackClick: () -> Unit,
     onNavigateToDocumentos: () -> Unit = {},
+    onNavigateToMedicacion: () -> Unit = {},
     onSosClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var isEditing by remember { mutableStateOf(false) }
+    var isEditingFull by remember { mutableStateOf(false) }
 
     LaunchedEffect(familyGroupId, userRole) {
         viewModel.loadPatient(familyGroupId, userRole)
     }
 
-    val diagBrush = Brush.linearGradient(
-        colors = listOf(Color(0xFFF3E8FF), Color(0xFFE8FFF3))
-    )
-
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
-                title = { 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Assignment, contentDescription = null, tint = LavandaPrimary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Ficha", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                },
+                title = { Text("Ficha Médica del Adulto Mayor", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack, 
-                            contentDescription = "Atrás",
-                            tint = LavandaPrimary
-                        )
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás", tint = LavandaPrimary)
                     }
                 },
                 actions = {
@@ -175,54 +188,40 @@ fun PatientScreenContainer(
             SosFloatingButton(onClick = onSosClick)
         }
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(diagBrush)
-        ) {
-            Crossfade(targetState = uiState, label = "patientState") { state ->
-                when (state) {
+        AppBackgroundDecorated {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                when (val state = uiState) {
                     is PatientUiState.Loading -> {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            CircularProgressIndicator(color = LavandaPrimary)
                         }
                     }
                     is PatientUiState.Empty -> {
-                        if (isEditing) {
-                            PatientFormScreen(
-                                patient = null,
-                                onSaveClick = { n, f, d, g, p, hc, ss, mt, e_n, e_t, e_r, cr, m, a, i, pic ->
-                                    viewModel.registrarOEditarPatient(n, f, d, g, p, hc, ss, mt, e_n, e_t, e_r, cr, m, a, i, pic)
-                                    isEditing = false
-                                },
-                                onCancelClick = { isEditing = false },
-                                viewModel = viewModel
-                            )
-                        } else {
-                            PatientEmptyState(
-                                userRole = userRole,
-                                onRegisterClick = { isEditing = true }
-                            )
-                        }
+                        PatientEmptyState(
+                            canEdit = userRole == Role.ADMINISTRADOR_FAMILIAR || userRole == Role.COLABORADOR,
+                            onCreateClick = { isEditingFull = true }
+                        )
                     }
                     is PatientUiState.Loaded -> {
-                        if (isEditing && state.canEdit) {
+                        if (isEditingFull && state.canEdit) {
                             PatientFormScreen(
                                 patient = state.patient,
-                                onSaveClick = { n, f, d, g, p, hc, ss, mt, e_n, e_t, e_r, cr, m, a, i, pic ->
-                                    viewModel.registrarOEditarPatient(n, f, d, g, p, hc, ss, mt, e_n, e_t, e_r, cr, m, a, i, pic)
-                                    isEditing = false
-                                },
-                                onCancelClick = { isEditing = false },
-                                viewModel = viewModel
+                                familyGroupId = familyGroupId,
+                                viewModel = viewModel,
+                                onSaveSuccess = { isEditingFull = false },
+                                onCancel = { isEditingFull = false }
                             )
                         } else {
                             PatientDetailsScreen(
                                 patient = state.patient,
                                 canEdit = state.canEdit,
-                                onEditClick = { isEditing = true },
+                                onEditClick = { isEditingFull = true },
                                 onNavigateToDocumentos = onNavigateToDocumentos,
+                                onNavigateToMedicacion = onNavigateToMedicacion,
                                 viewModel = viewModel,
                                 familyGroupId = familyGroupId,
                                 userRole = userRole
@@ -230,16 +229,8 @@ fun PatientScreenContainer(
                         }
                     }
                     is PatientUiState.Error -> {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(state.mensaje, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { viewModel.loadPatient(familyGroupId, userRole) }) {
-                                Text("Reintentar")
-                            }
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Error: ${state.mensaje}", color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -248,397 +239,76 @@ fun PatientScreenContainer(
     }
 }
 
-/**
- * Pantalla de estado vacío cuando aún no hay información médica registrada para el paciente del grupo.
- * Ofrece la opción de registrar la ficha si el usuario tiene rol con permisos.
- */
 @Composable
-fun PatientEmptyState(userRole: Role, onRegisterClick: () -> Unit) {
-    Card(
-        modifier = Modifier.padding(24.dp).fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+fun PatientEmptyState(
+    canEdit: Boolean,
+    onCreateClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = "Aún no registraste a la persona bajo cuidado",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (userRole == Role.ADMINISTRADOR_FAMILIAR) {
-                Text(
-                    text = "Como Administrador, debes dar de alta la ficha médica inicial.",
-                    fontSize = 14.sp,
-                    color = TextoSecundario,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                GradientButton(
-                    text = "Registrar adulto mayor",
-                    onClick = onRegisterClick
-                )
-            } else {
-                Text(
-                    text = "El administrador de la familia aún no registra los datos clínicos.",
-                    fontSize = 14.sp,
-                    color = TextoSecundario,
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-    }
-}
-
-/**
- * Pantalla de formulario para registrar o modificar la ficha médica del paciente.
- * Permite editar datos personales, tipo de sangre, contactos de emergencia, alergias, antecedentes y seguro médico.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PatientFormScreen(
-    patient: Patient?,
-    onSaveClick: (String, String, String, String, Double, String, String, String, String, String, String, String, String, List<Allergy>, String?, String?) -> Unit,
-    onCancelClick: () -> Unit,
-    viewModel: PatientViewModel
-) {
-    val context = LocalContext.current
-    
-
-    var nombre by remember { mutableStateOf(patient?.nombre ?: "") }
-    var fechaNacimiento by remember { mutableStateOf(patient?.fechaNacimiento ?: "") }
-    var dni by remember { mutableStateOf(patient?.dni ?: "") }
-    var fotoUrl by remember { mutableStateOf(patient?.fotoUrl) }
-
-
-    var grupoSanguineo by remember { mutableStateOf(patient?.grupoSanguineo ?: "O+") }
-    var pesoStr by remember { mutableStateOf(patient?.pesoActual?.toString() ?: "") }
-    var historiaClinica by remember { mutableStateOf(patient?.historiaClinica ?: "") }
-    var seguroSalud by remember { mutableStateOf(patient?.seguroSalud ?: "") }
-    var medicoTratante by remember { mutableStateOf(patient?.medicoTratante ?: "") }
-
-
-    var contactoEmergenciaNombre by remember { mutableStateOf(patient?.contactoEmergenciaNombre ?: "") }
-    var contactoEmergenciaTelefono by remember { mutableStateOf(patient?.contactoEmergenciaTelefono ?: "") }
-    var contactoEmergenciaRelacion by remember { mutableStateOf(patient?.contactoEmergenciaRelacion ?: "") }
-
-
-    var enfermedadesCronicas by remember { mutableStateOf(patient?.enfermedadesCronicas ?: "") }
-    var medicamentosActuales by remember { mutableStateOf(patient?.medicamentosActuales ?: "") }
-    var infoAdicional by remember { mutableStateOf(patient?.informacionAdicional ?: "") }
-
-    var showAllergyDialog by remember { mutableStateOf(false) }
-    var alergiasList by remember { mutableStateOf<List<Allergy>>(emptyList()) }
-
-    LaunchedEffect(patient) {
-        if (patient != null) {
-            val groupId = patient.familyGroupId
-            val result = PatientRepository.obtenerAlergiasDelPatient(groupId, patient.id)
-            if (result is Result.Success) {
-                alergiasList = result.data
-            }
-        }
-    }
-
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-        onResult = { uri ->
-            uri?.let {
-                try {
-                    context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (e: Exception) { e.printStackTrace() }
-                fotoUrl = it.toString()
-            }
-        }
-    )
-
-    var bloodDropdownExpanded by remember { mutableStateOf(false) }
-    var seguroDropdownExpanded by remember { mutableStateOf(false) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    
-    val opcionesSangre = listOf("O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-")
-    val opcionesSeguro = listOf("Ninguno", "Obra Social", "Prepaga", "Plan Público", "Seguro Privado")
-
-    val datePickerState = rememberDatePickerState(
-        initialSelectedDateMillis = try {
-            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(fechaNacimiento)?.time
-        } catch (e: Exception) { System.currentTimeMillis() }
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        Text(
-            text = if (patient == null) "Alta de Paciente" else "Editar Ficha Completa",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.primary
-        )
-
-
-        PatientFormSection(title = "Datos Personales") {
             Box(
                 modifier = Modifier
-                    .size(100.dp)
-                    .align(Alignment.CenterHorizontally)
-                    .shadow(elevation = 8.dp, shape = CircleShape, spotColor = LavandaPrimary)
-                    .clip(CircleShape)
-                    .background(LavandaPrimaryLight)
-                    .border(BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.3f)), CircleShape)
-                    .clickable { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    .size(80.dp)
+                    .background(LavandaPrimaryLight, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                if (fotoUrl != null) {
-                    AsyncImage(model = fotoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else {
-                    Icon(Icons.Default.Person, contentDescription = null, tint = LavandaPrimary, modifier = Modifier.size(40.dp))
-                }
-                Box(modifier = Modifier.fillMaxSize().padding(8.dp), contentAlignment = Alignment.BottomEnd) {
-                    Box(modifier = Modifier.size(24.dp).background(LavandaPrimary, CircleShape), contentAlignment = Alignment.Center) {
-                        Text("+", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = nombre,
-                onValueChange = { nombre = it },
-                label = { Text("Nombre Completo") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
-
-            Box(modifier = Modifier.fillMaxWidth().clickable { showDatePicker = true }) {
-                OutlinedTextField(
-                    value = fechaNacimiento,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Fecha Nacimiento (AAAA-MM-DD)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = false,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        disabledBorderColor = Color.Gray,
-                        disabledLabelColor = MaterialTheme.colorScheme.primary,
-                        disabledTextColor = Color.DarkGray
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                Icon(
+                    imageVector = Icons.Default.MedicalInformation,
+                    contentDescription = null,
+                    tint = LavandaPrimary,
+                    modifier = Modifier.size(40.dp)
                 )
             }
-
-            OutlinedTextField(
-                value = dni,
-                onValueChange = { dni = it },
-                label = { Text("DNI / Identificación") },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                shape = RoundedCornerShape(12.dp)
-            )
-        }
-
-
-        PatientFormSection(title = "Datos Clínicos") {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ExposedDropdownMenuBox(
-                    expanded = bloodDropdownExpanded,
-                    onExpandedChange = { bloodDropdownExpanded = !bloodDropdownExpanded },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value = grupoSanguineo,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Sangre") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bloodDropdownExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    ExposedDropdownMenu(expanded = bloodDropdownExpanded, onDismissRequest = { bloodDropdownExpanded = false }) {
-                        opcionesSangre.forEach { op ->
-                            DropdownMenuItem(text = { Text(op) }, onClick = { grupoSanguineo = op; bloodDropdownExpanded = false })
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = pesoStr,
-                    onValueChange = { pesoStr = it },
-                    label = { Text("Peso (Kg)") },
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(12.dp)
-                )
-            }
-
-            OutlinedTextField(
-                value = historiaClinica,
-                onValueChange = { historiaClinica = it },
-                label = { Text("Nº Historia Clínica") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
-
-            ExposedDropdownMenuBox(
-                expanded = seguroDropdownExpanded,
-                onExpandedChange = { seguroDropdownExpanded = !seguroDropdownExpanded },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = seguroSalud,
-                    onValueChange = { seguroSalud = it },
-                    label = { Text("Seguro de Salud / Obra Social") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = seguroDropdownExpanded) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                ExposedDropdownMenu(expanded = seguroDropdownExpanded, onDismissRequest = { seguroDropdownExpanded = false }) {
-                    opcionesSeguro.forEach { op ->
-                        DropdownMenuItem(text = { Text(op) }, onClick = { seguroSalud = op; seguroDropdownExpanded = false })
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = medicoTratante,
-                onValueChange = { medicoTratante = it },
-                label = { Text("Médico Tratante Principal") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
-        }
-
-
-        PatientFormSection(title = "Contacto de Emergencia") {
-            OutlinedTextField(value = contactoEmergenciaNombre, onValueChange = { contactoEmergenciaNombre = it }, label = { Text("Nombre del Contacto") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = contactoEmergenciaTelefono, onValueChange = { contactoEmergenciaTelefono = it }, label = { Text("Teléfono") }, modifier = Modifier.weight(1.5f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), shape = RoundedCornerShape(12.dp))
-                OutlinedTextField(value = contactoEmergenciaRelacion, onValueChange = { contactoEmergenciaRelacion = it }, label = { Text("Relación") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp))
-            }
-        }
-
-
-        PatientFormSection(title = "Antecedentes y Tratamiento") {
-            OutlinedTextField(value = enfermedadesCronicas, onValueChange = { enfermedadesCronicas = it }, label = { Text("Enfermedades Crónicas") }, modifier = Modifier.fillMaxWidth(), minLines = 3, shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(value = medicamentosActuales, onValueChange = { medicamentosActuales = it }, label = { Text("Medicamentos Actuales") }, modifier = Modifier.fillMaxWidth(), minLines = 3, shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(value = infoAdicional, onValueChange = { infoAdicional = it }, label = { Text("Notas Adicionales (Opcional)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(12.dp))
-        }
-
-
-        Text("Alergias e Intolerancias", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
-        if (alergiasList.isEmpty()) {
-            Text("No se han registrado alergias. Puede añadirlas debajo.", fontSize = 13.sp, color = TextoSecundario)
-        } else {
-            var allergyToEdit by remember { mutableStateOf<Allergy?>(null) }
-            alergiasList.forEach { AlergiaTarjetaDescriptiva(allergy = it, onClick = { allergyToEdit = it }) }
             
-            if (allergyToEdit != null) {
-                AlergiaDialog(
-                    allergy = allergyToEdit,
-                    onDismiss = { allergyToEdit = null },
-                    onConfirm = { edited ->
-                        Log.d("PatientForm", "Editando alergia: ${edited.nombreAlergeno}")
-                        if (patient != null) {
-                            viewModel.agregarAlergia(edited)
-                        } else {
-                            alergiasList = alergiasList.map { if (it.id == edited.id) edited else it }
-                        }
-                        allergyToEdit = null
-                    }
-                )
-            }
-        }
-        
-        TextButton(onClick = { showAllergyDialog = true }, modifier = Modifier.align(Alignment.Start)) {
-            Text("+ Agregar Alergia", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(onClick = onCancelClick, modifier = Modifier.weight(1f)) { Text("Cancelar", color = TextoSecundario) }
-            GradientButton(
-                text = "Guardar ficha",
-                onClick = {
-                    val peso = pesoStr.toDoubleOrNull() ?: 0.0
-                    onSaveClick(nombre, fechaNacimiento, dni, grupoSanguineo, peso, historiaClinica, seguroSalud, medicoTratante, contactoEmergenciaNombre, contactoEmergenciaTelefono, contactoEmergenciaRelacion, enfermedadesCronicas, medicamentosActuales, alergiasList, infoAdicional.ifBlank { null }, fotoUrl)
-                },
-                enabled = nombre.isNotBlank() && fechaNacimiento.isNotBlank() && pesoStr.isNotBlank(),
-                modifier = Modifier.weight(1.5f)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = "Ficha Médica no registrada",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
-        }
-    }
-
-    if (showDatePicker) {
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { ms ->
-                        val utcCalendar = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = ms }
-                        fechaNacimiento = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(utcCalendar.time)
-                    }
-                    showDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancelar") } }
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
-    if (showAllergyDialog) {
-        AlergiaDialog(
-            allergy = null,
-            onDismiss = { showAllergyDialog = false },
-            onConfirm = { newAllergy ->
-                Log.d("PatientForm", "Agregando nueva alergia: ${newAllergy.nombreAlergeno}")
-                if (patient != null) {
-                    viewModel.agregarAlergia(newAllergy)
-                } else {
-                    alergiasList = alergiasList + newAllergy
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "Aún no se han completado los datos del adulto mayor para este grupo familiar.",
+                fontSize = 14.sp,
+                color = TextoSecundario,
+                textAlign = TextAlign.Center
+            )
+            
+            if (canEdit) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onCreateClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Completar Ficha Médica", fontWeight = FontWeight.Bold)
                 }
-                showAllergyDialog = false
             }
-        )
-    }
-}
-
-@Composable
-fun PatientFormSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(text = title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            content()
         }
     }
 }
 
-/**
- * Pantalla de visualización/lectura completa de la ficha médica del paciente.
- * Presenta secciones detalladas de información personal, médica, alergias, contactos de emergencia y ediciones rápidas.
- */
 @Composable
 fun PatientDetailsScreen(
     patient: Patient,
     canEdit: Boolean,
     onEditClick: () -> Unit,
     onNavigateToDocumentos: () -> Unit = {},
+    onNavigateToMedicacion: () -> Unit = {},
     viewModel: PatientViewModel,
     familyGroupId: String,
     userRole: Role
@@ -647,20 +317,19 @@ fun PatientDetailsScreen(
     val esAdmin = userRole == Role.ADMINISTRADOR_FAMILIAR
     var showAllergyDialog by remember { mutableStateOf(false) }
 
-
     var showEditPersonal by remember { mutableStateOf(false) }
     var showEditClinical by remember { mutableStateOf(false) }
     var showEditEmergency by remember { mutableStateOf(false) }
     var showEditChronic by remember { mutableStateOf(false) }
     var showEditMeds by remember { mutableStateOf(false) }
-    var showEditBlood by remember { mutableStateOf(false) }
-    var showEditWeight by remember { mutableStateOf(false) }
-    
+    var showEditSangrePeso by remember { mutableStateOf(false) }
+
     LaunchedEffect(patient, familyGroupId) {
         val result = PatientRepository.obtenerAlergiasDelPatient(familyGroupId, patient.id)
         if (result is Result.Success) {
             alergiasList = result.data
         }
+        Log.d("FichaRol", "rol=$userRole, mostrando medicamentos=${patient.medicamentosActuales.isNotEmpty()}")
     }
 
     Column(
@@ -670,6 +339,30 @@ fun PatientDetailsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
+        // Banner Informativo para Cuidador Externo
+        if (userRole == Role.CUIDADOR_EXTERNO) {
+            Surface(
+                color = LavandaPrimaryLight,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = LavandaPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Vista de Cuidador Externo: datos para el cuidado diario",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LavandaPrimary
+                    )
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -687,7 +380,6 @@ fun PatientDetailsScreen(
                 }
             }
         }
-
 
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -733,7 +425,7 @@ fun PatientDetailsScreen(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = RojoAlertaFondo),
-                modifier = Modifier.weight(1f).clickable(enabled = esAdmin) { showEditBlood = true },
+                modifier = Modifier.weight(1f).clickable(enabled = esAdmin) { showEditSangrePeso = true },
                 shape = RoundedCornerShape(20.dp)
             ) {
                 Box {
@@ -750,7 +442,7 @@ fun PatientDetailsScreen(
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = LavandaPrimaryLight),
-                modifier = Modifier.weight(1f).clickable(enabled = esAdmin) { showEditWeight = true },
+                modifier = Modifier.weight(1f).clickable(enabled = esAdmin) { showEditSangrePeso = true },
                 shape = RoundedCornerShape(20.dp)
             ) {
                 Box {
@@ -766,60 +458,60 @@ fun PatientDetailsScreen(
             }
         }
 
-        // Secciones restringidas según Requerimiento 11 (Ocultas para CUIDADOR_EXTERNO)
-        if (userRole != Role.CUIDADOR_EXTERNO) {
-            // Acceso a Documentos Médicos Digitalizados
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.2f)),
+        // Acceso a Documentos Médicos / Recetas Digitalizadas (Visible para todos)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.2f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateToDocumentos() }
+        ) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onNavigateToDocumentos() }
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .size(48.dp)
+                        .background(LavandaPrimaryLight, CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(LavandaPrimaryLight, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FolderShared,
-                            contentDescription = null,
-                            tint = LavandaPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Documentos Médicos",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Ver y subir recetas, exámenes, radiografías",
-                            fontSize = 12.sp,
-                            color = TextoSecundario
-                        )
-                    }
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        imageVector = Icons.Default.FolderShared,
                         contentDescription = null,
                         tint = LavandaPrimary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (userRole == Role.CUIDADOR_EXTERNO) "Ver Recetas Médicas" else "Documentos Médicos",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = if (userRole == Role.CUIDADOR_EXTERNO) "Consulta recetas, dosis e indicaciones médicas" else "Ver y subir recetas, exámenes, radiografías",
+                        fontSize = 12.sp,
+                        color = TextoSecundario
+                    )
+                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = LavandaPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
+        }
 
+        // Secciones restringidas (Ocultas para CUIDADOR_EXTERNO)
+        if (userRole != Role.CUIDADOR_EXTERNO) {
             PatientInfoSectionCard(
                 title = "Datos Clínicos",
                 icon = Icons.Default.MedicalInformation,
@@ -868,7 +560,20 @@ fun PatientDetailsScreen(
                 clickable = esAdmin,
                 onClick = { showEditMeds = true }
             ) {
-                Text(patient.medicamentosActuales.ifBlank { "Sin medicación reportada." }, fontSize = 14.sp, lineHeight = 20.sp)
+                Column {
+                    Text(patient.medicamentosActuales.ifBlank { "Sin medicación reportada." }, fontSize = 14.sp, lineHeight = 20.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onNavigateToMedicacion,
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                    ) {
+                        Icon(Icons.Default.Medication, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Ver medicación", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
             }
         }
 
@@ -903,6 +608,87 @@ fun PatientDetailsScreen(
             }
         }
 
+        // Medicamentos Actuales para Cuidador Externo
+        if (userRole == Role.CUIDADOR_EXTERNO) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Color(0xFF4A90E2).copy(alpha = 0.3f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color(0xFFEBF3FA), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Medication,
+                                contentDescription = null,
+                                tint = Color(0xFF4A90E2),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Medicamentos Actuales",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Surface(
+                        color = Color(0xFFF4F8FC),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFD6E4F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = patient.medicamentosActuales.ifBlank { "Aún no se registraron medicamentos" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextoPrincipalColor,
+                            lineHeight = 22.sp,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Button(
+                        onClick = onNavigateToDocumentos,
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Icon(Icons.Default.FolderShared, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ver recetas médicas", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = onNavigateToMedicacion,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Medication, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ver control de medicación", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
         if (userRole != Role.CUIDADOR_EXTERNO && patient.informacionAdicional != null) {
             Text("Notas Adicionales", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
             Card(
@@ -917,110 +703,75 @@ fun PatientDetailsScreen(
         Spacer(modifier = Modifier.height(32.dp))
     }
 
-
+    // DIÁLOGOS DE EDICIÓN
     if (showEditPersonal) {
-        QuickEditDialog(
-            title = "Editar Datos Personales",
+        EditarDatosPersonalesDialog(
+            patient = patient,
             onDismiss = { showEditPersonal = false },
-            onSave = { cambios -> viewModel.actualizarCampos(cambios); showEditPersonal = false }
-        ) {
-            var n by remember { mutableStateOf(patient.nombre) }
-            var f by remember { mutableStateOf(patient.fechaNacimiento) }
-            var d by remember { mutableStateOf(patient.dni) }
-            OutlinedTextField(value = n, onValueChange = { n = it }, label = { Text("Nombre Completo") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = f, onValueChange = { f = it }, label = { Text("Fecha Nacimiento (AAAA-MM-DD)") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = d, onValueChange = { d = it }, label = { Text("DNI") }, modifier = Modifier.fillMaxWidth())
-            mapOf("nombre" to n, "fechaNacimiento" to f, "dni" to d)
-        }
+            onSave = { cambios ->
+                viewModel.actualizarCampos(cambios)
+                showEditPersonal = false
+            }
+        )
+    }
+
+    if (showEditSangrePeso) {
+        EditarSangrePesoDialog(
+            patient = patient,
+            onDismiss = { showEditSangrePeso = false },
+            onSave = { grupoSanguineo, pesoKg ->
+                viewModel.actualizarCampos(mapOf("grupoSanguineo" to grupoSanguineo))
+                if (pesoKg != null && pesoKg > 0) {
+                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                    viewModel.actualizarPeso(sdf.format(Date()), pesoKg)
+                }
+                showEditSangrePeso = false
+            }
+        )
     }
 
     if (showEditClinical) {
-        QuickEditDialog(
-            title = "Editar Datos Clínicos",
+        EditarDatosClinicosDialog(
+            patient = patient,
             onDismiss = { showEditClinical = false },
-            onSave = { cambios -> viewModel.actualizarCampos(cambios); showEditClinical = false }
-        ) {
-            var hc by remember { mutableStateOf(patient.historiaClinica) }
-            var ss by remember { mutableStateOf(patient.seguroSalud) }
-            var mt by remember { mutableStateOf(patient.medicoTratante) }
-            OutlinedTextField(value = hc, onValueChange = { hc = it }, label = { Text("Historia Clínica") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = ss, onValueChange = { ss = it }, label = { Text("Seguro de Salud") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = mt, onValueChange = { mt = it }, label = { Text("Médico Tratante") }, modifier = Modifier.fillMaxWidth())
-            mapOf("historiaClinica" to hc, "seguroSalud" to ss, "medicoTratante" to mt)
-        }
+            onSave = { cambios ->
+                viewModel.actualizarCampos(cambios)
+                showEditClinical = false
+            }
+        )
     }
 
     if (showEditEmergency) {
-        QuickEditDialog(
-            title = "Contacto de Emergencia",
+        EditarContactoEmergenciaDialog(
+            patient = patient,
             onDismiss = { showEditEmergency = false },
-            onSave = { cambios -> viewModel.actualizarCampos(cambios); showEditEmergency = false }
-        ) {
-            var en by remember { mutableStateOf(patient.contactoEmergenciaNombre) }
-            var et by remember { mutableStateOf(patient.contactoEmergenciaTelefono) }
-            var er by remember { mutableStateOf(patient.contactoEmergenciaRelacion) }
-            OutlinedTextField(value = en, onValueChange = { en = it }, label = { Text("Nombre de Contacto") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = et, onValueChange = { et = it }, label = { Text("Teléfono") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
-            OutlinedTextField(value = er, onValueChange = { er = it }, label = { Text("Relación (ej: Hijo)") }, modifier = Modifier.fillMaxWidth())
-            mapOf("contactoEmergenciaNombre" to en, "contactoEmergenciaTelefono" to et, "contactoEmergenciaRelacion" to er)
-        }
+            onSave = { cambios ->
+                viewModel.actualizarCampos(cambios)
+                showEditEmergency = false
+            }
+        )
     }
 
     if (showEditChronic) {
-        QuickEditDialog(title = "Enfermedades Crónicas", onDismiss = { showEditChronic = false }, onSave = { c -> viewModel.actualizarCampos(c); showEditChronic = false }) {
-            var text by remember { mutableStateOf(patient.enfermedadesCronicas) }
-            OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Descripción") }, modifier = Modifier.fillMaxWidth(), minLines = 5)
-            mapOf("enfermedadesCronicas" to text)
-        }
+        EditarEnfermedadesCronicasDialog(
+            patient = patient,
+            onDismiss = { showEditChronic = false },
+            onSave = { cambios ->
+                viewModel.actualizarCampos(cambios)
+                showEditChronic = false
+            }
+        )
     }
 
     if (showEditMeds) {
-        QuickEditDialog(title = "Medicamentos Actuales", onDismiss = { showEditMeds = false }, onSave = { c -> viewModel.actualizarCampos(c); showEditMeds = false }) {
-            var text by remember { mutableStateOf(patient.medicamentosActuales) }
-            OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Lista de Medicamentos") }, modifier = Modifier.fillMaxWidth(), minLines = 5)
-            mapOf("medicamentosActuales" to text)
-        }
-    }
-
-    if (showEditBlood) {
-        QuickEditDialog(title = "Grupo Sanguíneo", onDismiss = { showEditBlood = false }, onSave = { c -> viewModel.actualizarCampos(c); showEditBlood = false }) {
-            var g by remember { mutableStateOf(patient.grupoSanguineo) }
-            val opciones = listOf("O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-")
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                opciones.chunked(4).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { op ->
-                            Surface(
-                                onClick = { g = op },
-                                color = if (g == op) RojoAlerta else Color.White,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, RojoAlerta.copy(alpha = 0.2f)),
-                                modifier = Modifier.weight(1f).height(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) { Text(op, color = if (g == op) Color.White else RojoAlerta, fontWeight = FontWeight.Bold) }
-                            }
-                        }
-                    }
-                }
+        EditarMedicamentosActualesDialog(
+            patient = patient,
+            onDismiss = { showEditMeds = false },
+            onSave = { cambios ->
+                viewModel.actualizarCampos(cambios)
+                showEditMeds = false
             }
-            mapOf("grupoSanguineo" to g)
-        }
-    }
-
-    if (showEditWeight) {
-        QuickEditDialog(title = "Nuevo Registro de Peso", onDismiss = { showEditWeight = false }, onSave = { _ -> /* handled inside */ showEditWeight = false }) {
-            var w by remember { mutableStateOf(patient.pesoActual.toString()) }
-            Column {
-                OutlinedTextField(value = w, onValueChange = { w = it }, label = { Text("Peso en Kg") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                Spacer(modifier = Modifier.height(16.dp))
-                GradientButton(text = "Guardar Peso", onClick = { 
-                    val valKg = w.toDoubleOrNull() ?: 0.0
-                    viewModel.actualizarPeso(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()), valKg)
-                    showEditWeight = false
-                })
-            }
-            emptyMap<String, Any>()
-        }
+        )
     }
 
     if (showAllergyDialog) {
@@ -1028,7 +779,6 @@ fun PatientDetailsScreen(
             allergy = null,
             onDismiss = { showAllergyDialog = false },
             onConfirm = { newAllergy ->
-                Log.d("PatientDetails", "Agregando alergia a Firestore: ${newAllergy.nombreAlergeno}")
                 viewModel.agregarAlergia(newAllergy)
                 showAllergyDialog = false
             }
@@ -1036,100 +786,781 @@ fun PatientDetailsScreen(
     }
 }
 
+/**
+ * Requerimiento 1 & 3: Diálogo para editar Datos Personales (Nombre, Fecha de Nacimiento y DNI).
+ * Usa un solo contenedor Column con verticalScroll(), imePadding() y SelectorFechaDialog.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlergiaDialog(
-    allergy: Allergy?,
+fun EditarDatosPersonalesDialog(
+    patient: Patient,
     onDismiss: () -> Unit,
-    onConfirm: (Allergy) -> Unit
+    onSave: (Map<String, Any>) -> Unit
 ) {
-    var alergeno by remember { mutableStateOf(allergy?.nombreAlergeno ?: "") }
-    var severidad by remember { mutableStateOf(allergy?.severidad ?: Severidad.LEVE) }
-    var reaccion by remember { mutableStateOf(allergy?.descripcionReaccion ?: "") }
-    var sevExpanded by remember { mutableStateOf(false) }
+    var nombre by remember { mutableStateOf(patient.nombre) }
+    var fechaIso by remember { mutableStateOf(patient.fechaNacimiento) }
+    var dni by remember { mutableStateOf(patient.dni) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+
+    Dialog(onDismissRequest = onDismiss) {
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                .padding(horizontal = 8.dp)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = if (allergy == null) "Nueva Alergia" else "Editar Alergia",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                OutlinedTextField(
-                    value = alergeno,
-                    onValueChange = { alergeno = it },
-                    label = { Text("Alérgeno (ej: Penicilina)") },
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                ExposedDropdownMenuBox(expanded = sevExpanded, onExpandedChange = { sevExpanded = !sevExpanded }) {
-                    OutlinedTextField(
-                        value = severidad.name,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Severidad") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sevExpanded) },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                // Header del Diálogo
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = LavandaPrimary,
+                        modifier = Modifier.size(24.dp)
                     )
-                    ExposedDropdownMenu(expanded = sevExpanded, onDismissRequest = { sevExpanded = false }) {
-                        Severidad.entries.forEach { sev ->
-                            DropdownMenuItem(text = { Text(sev.name) }, onClick = {
-                                severidad = sev
-                                sevExpanded = false
-                            })
-                        }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Editar Datos Personales",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Actualiza los datos de ${patient.nombre}",
+                            fontSize = 13.sp,
+                            color = TextoSecundario
+                        )
                     }
                 }
 
-                OutlinedTextField(
-                    value = reaccion,
-                    onValueChange = { reaccion = it },
-                    label = { Text("Reacción Sintomática") },
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                // Contenido Scrolleable con restricción de altura e IME Padding
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = nombre,
+                        onValueChange = { nombre = it },
+                        label = { Text("Nombre completo", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = formatFechaNacimientoEspanol(fechaIso),
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("Fecha de nacimiento", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        trailingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null, tint = LavandaPrimary) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDatePicker = true },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = Color(0xFF1F1B2E),
+                            disabledBorderColor = MaterialTheme.colorScheme.outline,
+                            disabledLabelColor = Color(0xFF4B4560),
+                            disabledTrailingIconColor = LavandaPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = dni,
+                        onValueChange = { input ->
+                            if (input.length <= 8 && input.all { it.isDigit() }) {
+                                dni = input
+                            }
+                        },
+                        label = { Text("DNI (8 dígitos)", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                // Botones Fijos de Acción
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Button(
+                        onClick = {
+                            if (nombre.isNotBlank()) {
+                                onSave(mapOf("nombre" to nombre.trim(), "fechaNacimiento" to fechaIso, "dni" to dni.trim()))
+                            }
+                        },
+                        enabled = nombre.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        SelectorFechaDialog(
+            fechaInicial = try { LocalDate.parse(fechaIso) } catch (e: Exception) { LocalDate.now() },
+            titulo = "Fecha de Nacimiento",
+            fechaMinima = null,
+            onFechaSeleccionada = { fecha ->
+                fechaIso = fecha.toString()
+                showDatePicker = false
+            },
+            onCancelar = { showDatePicker = false }
+        )
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para editar Sangre y Peso Actual.
+ */
+@Composable
+fun EditarSangrePesoDialog(
+    patient: Patient,
+    onDismiss: () -> Unit,
+    onSave: (grupoSanguineo: String, pesoKg: Double?) -> Unit
+) {
+    var grupoSanguineo by remember { mutableStateOf(patient.grupoSanguineo.ifBlank { "O+" }) }
+    var pesoStr by remember { mutableStateOf(if (patient.pesoActual > 0) DecimalFormat("0.0", DecimalFormatSymbols(Locale.US)).format(patient.pesoActual) else "") }
+
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+    val opcionesSangre = listOf("O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-")
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.WaterDrop, contentDescription = null, tint = RojoAlerta, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Editar Sangre y Peso", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Actualiza los datos de ${patient.nombre}", fontSize = 13.sp, color = TextoSecundario)
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Column {
+                        Text("Grupo Sanguíneo:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4B4560))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(opcionesSangre) { op ->
+                                FilterChip(
+                                    selected = grupoSanguineo == op,
+                                    onClick = { grupoSanguineo = op },
+                                    label = { Text(op, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = pesoStr,
+                        onValueChange = { input ->
+                            if (input.isBlank() || input.matches(Regex("""^\d*(\.\d{0,2})?$"""))) {
+                                pesoStr = input
+                            }
+                        },
+                        label = { Text("Peso Actual", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        suffix = { Text("kg", fontWeight = FontWeight.Bold, color = LavandaPrimary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Cerrar", color = TextoSecundario) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    GradientButton(
-                        text = if (allergy == null) "Añadir" else "Guardar",
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
                         onClick = {
-                            onConfirm(
-                                Allergy(
-                                    id = allergy?.id ?: UUID.randomUUID().toString(),
-                                    nombreAlergeno = alergeno,
-                                    severidad = severidad,
-                                    descripcionReaccion = reaccion
-                                )
-                            )
+                            val pVal = pesoStr.toDoubleOrNull()
+                            onSave(grupoSanguineo, pVal)
                         },
-                        enabled = alergeno.isNotBlank(),
-                        modifier = Modifier.height(44.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para editar Datos Clínicos.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditarDatosClinicosDialog(
+    patient: Patient,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Any>) -> Unit
+) {
+    var historiaClinica by remember { mutableStateOf(patient.historiaClinica) }
+    var seguroSalud by remember { mutableStateOf(patient.seguroSalud) }
+    var medicoTratante by remember { mutableStateOf(patient.medicoTratante) }
+
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+    val opcionesSeguro = listOf("EsSalud", "SIS", "Particular", "Ninguno", "Otro")
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.MedicalInformation, contentDescription = null, tint = LavandaPrimary, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Editar Datos Clínicos", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Actualiza los datos de ${patient.nombre}", fontSize = 13.sp, color = TextoSecundario)
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = historiaClinica,
+                        onValueChange = { historiaClinica = it },
+                        label = { Text("Historia Clínica / N° expediente", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
                     )
+
+                    Column {
+                        Text("Seguro de Salud:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4B4560))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(opcionesSeguro) { op ->
+                                FilterChip(
+                                    selected = seguroSalud == op,
+                                    onClick = { seguroSalud = op },
+                                    label = { Text(op, fontSize = 13.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = seguroSalud,
+                        onValueChange = { seguroSalud = it },
+                        label = { Text("Nombre o detalle del seguro de salud", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = medicoTratante,
+                        onValueChange = { medicoTratante = it },
+                        label = { Text("Médico Tratante Principal", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = {
+                            onSave(mapOf("historiaClinica" to historiaClinica.trim(), "seguroSalud" to seguroSalud.trim(), "medicoTratante" to medicoTratante.trim()))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para editar Contacto de Emergencia.
+ */
+@Composable
+fun EditarContactoEmergenciaDialog(
+    patient: Patient,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Any>) -> Unit
+) {
+    var cn by remember { mutableStateOf(patient.contactoEmergenciaNombre) }
+    var ct by remember { mutableStateOf(patient.contactoEmergenciaTelefono) }
+    var cr by remember { mutableStateOf(patient.contactoEmergenciaRelacion) }
+
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ContactEmergency, contentDescription = null, tint = RojoAlerta, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Contacto de Emergencia", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Actualiza los datos de ${patient.nombre}", fontSize = 13.sp, color = TextoSecundario)
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = cn,
+                        onValueChange = { cn = it },
+                        label = { Text("Nombre del Contacto", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = ct,
+                        onValueChange = { ct = it },
+                        label = { Text("Teléfono de Emergencia", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = cr,
+                        onValueChange = { cr = it },
+                        label = { Text("Relación / Parentesco", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = {
+                            onSave(mapOf("contactoEmergenciaNombre" to cn.trim(), "contactoEmergenciaTelefono" to ct.trim(), "contactoEmergenciaRelacion" to cr.trim()))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para editar Enfermedades Crónicas.
+ */
+@Composable
+fun EditarEnfermedadesCronicasDialog(
+    patient: Patient,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Any>) -> Unit
+) {
+    var ec by remember { mutableStateOf(patient.enfermedadesCronicas) }
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.HistoryEdu, contentDescription = null, tint = AmbarAlerta, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Enfermedades Crónicas", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Actualiza los datos de ${patient.nombre}", fontSize = 13.sp, color = TextoSecundario)
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = ec,
+                        onValueChange = { ec = it },
+                        label = { Text("Enfermedades Crónicas / Diagnósticos", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = { onSave(mapOf("enfermedadesCronicas" to ec.trim())) },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para editar Medicamentos Actuales.
+ */
+@Composable
+fun EditarMedicamentosActualesDialog(
+    patient: Patient,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Any>) -> Unit
+) {
+    var ma by remember { mutableStateOf(patient.medicamentosActuales) }
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Medication, contentDescription = null, tint = Color(0xFF4A90E2), modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Medicamentos Actuales", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Actualiza los datos de ${patient.nombre}", fontSize = 13.sp, color = TextoSecundario)
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = ma,
+                        onValueChange = { ma = it },
+                        label = { Text("Medicamentos Actuales (Dosis e Indicaciones)", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = { onSave(mapOf("medicamentosActuales" to ma.trim())) },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Requerimiento 4: Diálogo para agregar o editar una Alergia.
+ */
+@Composable
+fun AlergiaDialog(
+    allergy: Allergy?,
+    onDismiss: () -> Unit,
+    onConfirm: (Allergy) -> Unit
+) {
+    var nombreAlergeno by remember { mutableStateOf(allergy?.nombreAlergeno ?: "") }
+    var severidad by remember { mutableStateOf(allergy?.severidad ?: Severidad.LEVE) }
+    var descripcionReaccion by remember { mutableStateOf(allergy?.descripcionReaccion ?: "") }
+
+    val configuration = LocalConfiguration.current
+    val maxHeight = (configuration.screenHeightDp * 0.70f).dp
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Shield, contentDescription = null, tint = LavandaPrimary, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = if (allergy == null) "Agregar Alergia" else "Editar Alergia",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Registra o actualiza alergia conocida",
+                            fontSize = 13.sp,
+                            color = TextoSecundario
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = nombreAlergeno,
+                        onValueChange = { nombreAlergeno = it },
+                        label = { Text("Alergeno (ej: Penicilina, Avispas, Polen)", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Column {
+                        Text("Severidad:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4B4560))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Severidad.values().forEach { sev ->
+                                FilterChip(
+                                    selected = severidad == sev,
+                                    onClick = { severidad = sev },
+                                    label = { Text(sev.name, fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = descripcionReaccion,
+                        onValueChange = { descripcionReaccion = it },
+                        label = { Text("Descripción de la reacción (opcional)", fontSize = 14.sp, color = Color(0xFF4B4560)) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancelar", fontSize = 14.sp, color = Color.Gray)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = {
+                            if (nombreAlergeno.isNotBlank()) {
+                                val newAllergy = Allergy(
+                                    id = allergy?.id ?: UUID.randomUUID().toString(),
+                                    nombreAlergeno = nombreAlergeno.trim(),
+                                    severidad = severidad,
+                                    descripcionReaccion = descripcionReaccion.trim()
+                                )
+                                onConfirm(newAllergy)
+                            }
+                        },
+                        enabled = nombreAlergeno.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Guardar", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }
@@ -1141,28 +1572,35 @@ fun PatientInfoSectionCard(
     title: String,
     icon: ImageVector,
     color: Color,
-    clickable: Boolean,
-    onClick: () -> Unit,
+    clickable: Boolean = false,
+    onClick: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.15f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 2.dp, shape = RoundedCornerShape(20.dp))
-            .clickable(enabled = clickable) { onClick() }
+            .clickable(enabled = clickable, onClick = onClick)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(32.dp).background(color.copy(alpha = 0.1f), CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(color.copy(alpha = 0.12f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
                 }
-                if (clickable) Icon(Icons.Default.Edit, null, tint = color.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                if (clickable) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.Edit, null, tint = color.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                }
             }
             Spacer(modifier = Modifier.height(12.dp))
             content()
@@ -1171,115 +1609,427 @@ fun PatientInfoSectionCard(
 }
 
 @Composable
-fun QuickEditDialog(
-    title: String,
-    onDismiss: () -> Unit,
-    onSave: (Map<String, Any>) -> Unit,
-    content: @Composable () -> Map<String, Any>
+fun AlergiaTarjetaDescriptiva(
+    allergy: Allergy,
+    onClick: () -> Unit = {}
 ) {
-    var camposParaGuardar by remember { mutableStateOf(emptyMap<String, Any>()) }
-    
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                camposParaGuardar = content()
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text("Cancelar", color = TextoSecundario) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    GradientButton(text = "Guardar", onClick = { onSave(camposParaGuardar) }, modifier = Modifier.height(44.dp))
+    val (badgeBg, badgeText, badgeLabel) = when (allergy.severidad) {
+        Severidad.LEVE -> Triple(Color(0xFFE8F5E9), Color(0xFF2E7D32), "Leve")
+        Severidad.MODERADA -> Triple(Color(0xFFFFF3E0), Color(0xFFE65100), "Moderada")
+        Severidad.SEVERA -> Triple(Color(0xFFFFEBEE), Color(0xFFC62828), "Severa")
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, LavandaPrimary.copy(alpha = 0.15f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(badgeBg, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = null,
+                    tint = badgeText,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = allergy.nombreAlergeno,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                if (allergy.descripcionReaccion.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Reacción: \"${allergy.descripcionReaccion}\"",
+                        fontSize = 13.sp,
+                        color = TextoSecundario
+                    )
                 }
+            }
+
+            Surface(
+                color = badgeBg,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = badgeLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = badgeText,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                )
             }
         }
     }
 }
 
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlergiaTarjetaDescriptiva(
-    allergy: Allergy,
-    onClick: (() -> Unit)? = null
+fun PatientFormScreen(
+    patient: Patient?,
+    familyGroupId: String,
+    viewModel: PatientViewModel,
+    onSaveSuccess: () -> Unit,
+    onCancel: () -> Unit
 ) {
-    val (bgColor, textColor, strokeColor) = when (allergy.severidad) {
-        Severidad.SEVERA -> Triple(Color(0xFFFFEBEE), Color(0xFFD32F2F), Color(0xFFD32F2F))
-        Severidad.MODERADA -> Triple(Color(0xFFFFF3E0), Color(0xFFE65100), Color(0xFFE65100))
-        Severidad.LEVE -> Triple(Color(0xFFFFF8E1), Color(0xFFF57F17), Color(0xFFF57F17))
+    val context = LocalContext.current
+
+    var nombre by remember { mutableStateOf(patient?.nombre ?: "") }
+    var fechaNacimiento by remember { mutableStateOf(patient?.fechaNacimiento ?: "") }
+    var dni by remember { mutableStateOf(patient?.dni ?: "") }
+    var fotoUrl by remember { mutableStateOf(patient?.fotoUrl) }
+
+    var grupoSanguineo by remember { mutableStateOf(patient?.grupoSanguineo ?: "O+") }
+    var pesoStr by remember { mutableStateOf(patient?.pesoActual?.toString() ?: "") }
+    var historiaClinica by remember { mutableStateOf(patient?.historiaClinica ?: "") }
+    var seguroSalud by remember { mutableStateOf(patient?.seguroSalud ?: "") }
+    var medicoTratante by remember { mutableStateOf(patient?.medicoTratante ?: "") }
+
+    var contactoEmergenciaNombre by remember { mutableStateOf(patient?.contactoEmergenciaNombre ?: "") }
+    var contactoEmergenciaTelefono by remember { mutableStateOf(patient?.contactoEmergenciaTelefono ?: "") }
+    var contactoEmergenciaRelacion by remember { mutableStateOf(patient?.contactoEmergenciaRelacion ?: "") }
+
+    var enfermedadesCronicas by remember { mutableStateOf(patient?.enfermedadesCronicas ?: "") }
+    var medicamentosActuales by remember { mutableStateOf(patient?.medicamentosActuales ?: "") }
+    var infoAdicional by remember { mutableStateOf(patient?.informacionAdicional ?: "") }
+
+    var showAllergyDialog by remember { mutableStateOf(false) }
+    var alergiasList by remember { mutableStateOf<List<Allergy>>(emptyList()) }
+
+    LaunchedEffect(patient) {
+        if (patient != null) {
+            val groupId = patient.familyGroupId
+            val result = PatientRepository.obtenerAlergiasDelPatient(groupId, patient.id)
+            if (result is Result.Success) {
+                alergiasList = result.data
+            }
+        }
     }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = BorderStroke(1.dp, strokeColor.copy(alpha = 0.1f))
-    ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            uri?.let {
+                try {
+                    context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) { e.printStackTrace() }
+                fotoUrl = it.toString()
+            }
+        }
+    )
 
-            Box(
-                modifier = Modifier
-                    .width(6.dp)
-                    .fillMaxHeight()
-                    .background(strokeColor)
+    var bloodDropdownExpanded by remember { mutableStateOf(false) }
+    var seguroDropdownExpanded by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    
+    val opcionesSangre = listOf("O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-")
+    val opcionesSeguro = listOf("Ninguno", "EsSalud", "SIS", "Particular", "Otro")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        Text(
+            text = if (patient == null) "Alta de Paciente" else "Editar Ficha Completa",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .align(Alignment.CenterHorizontally)
+                .clip(CircleShape)
+                .background(LavandaPrimaryLight)
+                .clickable {
+                    photoPickerLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (fotoUrl != null) {
+                AsyncImage(
+                    model = fotoUrl,
+                    contentDescription = "Foto Paciente",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.AddAPhoto, contentDescription = null, tint = LavandaPrimary)
+                    Text("Subir foto", fontSize = 10.sp, color = LavandaPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("1. Datos Personales Básicos", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+            OutlinedTextField(
+                value = nombre,
+                onValueChange = { nombre = it },
+                label = { Text("Nombre Completo") },
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
 
-            Box(modifier = Modifier.padding(16.dp)) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = allergy.nombreAlergeno,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 16.sp,
-                                color = textColor
-                            )
-                        }
+            OutlinedTextField(
+                value = formatFechaNacimientoEspanol(fechaNacimiento),
+                onValueChange = {},
+                readOnly = true,
+                enabled = false,
+                label = { Text("Fecha de Nacimiento") },
+                trailingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null, tint = LavandaPrimary) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDatePicker = true },
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledTextColor = Color(0xFF1F1B2E),
+                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                    disabledLabelColor = Color(0xFF4B4560),
+                    disabledTrailingIconColor = LavandaPrimary
+                )
+            )
 
+            OutlinedTextField(
+                value = dni,
+                onValueChange = { input -> if (input.length <= 8 && input.all { it.isDigit() }) dni = input },
+                label = { Text("DNI (8 dígitos)") },
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Color(0xFF1F1B2E)),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+        }
 
-                        Surface(
-                            color = bgColor,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.padding(start = 8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (allergy.severidad == Severidad.SEVERA) {
-                                    Icon(
-                                        Icons.Default.Warning,
-                                        contentDescription = null,
-                                        tint = textColor,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                }
-                                Text(
-                                    text = allergy.severidad.name,
-                                    color = textColor,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                        }
-                    }
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("2. Datos Médicos Principales", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
 
-                    if (allergy.descripcionReaccion.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = allergy.descripcionReaccion,
-                            fontSize = 13.sp,
-                            color = Color.DarkGray,
-                            lineHeight = 18.sp
+            ExposedDropdownMenuBox(
+                expanded = bloodDropdownExpanded,
+                onExpandedChange = { bloodDropdownExpanded = !bloodDropdownExpanded }
+            ) {
+                OutlinedTextField(
+                    value = grupoSanguineo,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Grupo Sanguíneo") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bloodDropdownExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = bloodDropdownExpanded,
+                    onDismissRequest = { bloodDropdownExpanded = false }
+                ) {
+                    opcionesSangre.forEach { op ->
+                        DropdownMenuItem(
+                            text = { Text(op) },
+                            onClick = { grupoSanguineo = op; bloodDropdownExpanded = false }
                         )
                     }
                 }
             }
+
+            OutlinedTextField(
+                value = pesoStr,
+                onValueChange = { pesoStr = it },
+                label = { Text("Peso Actual (Kg)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
+            OutlinedTextField(
+                value = historiaClinica,
+                onValueChange = { historiaClinica = it },
+                label = { Text("N° Historia Clínica") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            ExposedDropdownMenuBox(
+                expanded = seguroDropdownExpanded,
+                onExpandedChange = { seguroDropdownExpanded = !seguroDropdownExpanded }
+            ) {
+                OutlinedTextField(
+                    value = seguroSalud,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Seguro de Salud") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = seguroDropdownExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = seguroDropdownExpanded,
+                    onDismissRequest = { seguroDropdownExpanded = false }
+                ) {
+                    opcionesSeguro.forEach { op ->
+                        DropdownMenuItem(
+                            text = { Text(op) },
+                            onClick = { seguroSalud = op; seguroDropdownExpanded = false }
+                        )
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = medicoTratante,
+                onValueChange = { medicoTratante = it },
+                label = { Text("Médico Tratante Principal") },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("3. Contacto de Emergencia Directo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+            OutlinedTextField(
+                value = contactoEmergenciaNombre,
+                onValueChange = { contactoEmergenciaNombre = it },
+                label = { Text("Nombre del Contacto") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = contactoEmergenciaTelefono,
+                onValueChange = { contactoEmergenciaTelefono = it },
+                label = { Text("Teléfono de Emergencia") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
+            OutlinedTextField(
+                value = contactoEmergenciaRelacion,
+                onValueChange = { contactoEmergenciaRelacion = it },
+                label = { Text("Relación / Parentesco") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("4. Cuadro Clínico y Medicación", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+            OutlinedTextField(
+                value = enfermedadesCronicas,
+                onValueChange = { enfermedadesCronicas = it },
+                label = { Text("Enfermedades Crónicas / Diagnósticos") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3
+            )
+            OutlinedTextField(
+                value = medicamentosActuales,
+                onValueChange = { medicamentosActuales = it },
+                label = { Text("Medicamentos Actuales (Dosis e Indicaciones)") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("5. Alergias Conocidas", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+            alergiasList.forEach { AlergiaTarjetaDescriptiva(allergy = it) }
+            OutlinedButton(onClick = { showAllergyDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Agregar Alergia")
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("6. Notas Adicionales", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+            OutlinedTextField(
+                value = infoAdicional,
+                onValueChange = { infoAdicional = it },
+                label = { Text("Cuidados especiales, preferencias, etc.") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(12.dp)) {
+                Text("Cancelar")
+            }
+            Button(
+                onClick = {
+                    if (nombre.isNotBlank()) {
+                        val pesoVal = pesoStr.toDoubleOrNull() ?: 0.0
+                        viewModel.registrarOEditarPatient(
+                            nombre = nombre,
+                            fechaNacimiento = fechaNacimiento,
+                            dni = dni,
+                            grupoSanguineo = grupoSanguineo,
+                            pesoActual = pesoVal,
+                            historiaClinica = historiaClinica,
+                            seguroSalud = seguroSalud,
+                            medicoTratante = medicoTratante,
+                            contactoEmergenciaNombre = contactoEmergenciaNombre,
+                            contactoEmergenciaTelefono = contactoEmergenciaTelefono,
+                            contactoEmergenciaRelacion = contactoEmergenciaRelacion,
+                            enfermedadesCronicas = enfermedadesCronicas,
+                            medicamentosActuales = medicamentosActuales,
+                            alergiasIniciales = alergiasList,
+                            informacionAdicional = infoAdicional.ifBlank { null },
+                            fotoUrl = fotoUrl
+                        )
+                        onSaveSuccess()
+                    }
+                },
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary)
+            ) {
+                Text("Guardar Ficha", fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showDatePicker) {
+        SelectorFechaDialog(
+            fechaInicial = try { LocalDate.parse(fechaNacimiento) } catch (e: Exception) { LocalDate.now() },
+            titulo = "Fecha de Nacimiento",
+            fechaMinima = null,
+            onFechaSeleccionada = { fecha ->
+                fechaNacimiento = fecha.toString()
+                showDatePicker = false
+            },
+            onCancelar = { showDatePicker = false }
+        )
+    }
+
+    if (showAllergyDialog) {
+        AlergiaDialog(
+            allergy = null,
+            onDismiss = { showAllergyDialog = false },
+            onConfirm = { newAllergy ->
+                alergiasList = alergiasList + newAllergy
+                showAllergyDialog = false
+            }
+        )
     }
 }

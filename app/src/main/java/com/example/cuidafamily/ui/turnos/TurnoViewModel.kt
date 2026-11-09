@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cuidafamily.model.EstadoConfirmacion
 import com.example.cuidafamily.model.EstadoTurno
+import com.example.cuidafamily.model.ExcepcionTurno
+import com.example.cuidafamily.model.Role
+import com.example.cuidafamily.model.SolicitudIntercambio
 import com.example.cuidafamily.model.Turno
 import com.example.cuidafamily.model.TurnoCheckIn
 import com.example.cuidafamily.repository.AuthRepository
@@ -43,8 +46,11 @@ data class TurnoUiState(
     val todosLosTurnos: List<Turno> = emptyList(),
     val turnosActivos: List<Turno> = emptyList(),
     val turnosCanceladosAvisos: List<Turno> = emptyList(),
+    val solicitudesIntercambio: List<SolicitudIntercambio> = emptyList(),
+    val excepcionesTurno: List<ExcepcionTurno> = emptyList(),
     val checkInsHoy: List<TurnoCheckIn> = emptyList(),
     val miembrosGrupo: List<GroupMemberInfo> = emptyList(),
+    val tarifasMap: Map<String, Double> = emptyMap(),
     val domicilioLat: Double? = null,
     val domicilioLng: Double? = null,
     val offsetSemanas: Int = 0,
@@ -96,11 +102,18 @@ class TurnoViewModel : ViewModel() {
 
         listeningJob = viewModelScope.launch {
             combine(
-                TurnoRepository.obtenerTodosLosTurnos(familyGroupId),
-                TurnoRepository.obtenerCheckInsDeHoy(familyGroupId)
-            ) { turnos, checkIns ->
-                Pair(turnos, checkIns)
-            }.collectLatest { (turnos, checkIns) ->
+                combine(
+                    TurnoRepository.obtenerTodosLosTurnos(familyGroupId),
+                    TurnoRepository.obtenerCheckInsDeHoy(familyGroupId),
+                    TurnoRepository.obtenerSolicitudesIntercambio(familyGroupId)
+                ) { turnos, checkIns, solicitudes -> Triple(turnos, checkIns, solicitudes) },
+                combine(
+                    TurnoRepository.obtenerExcepcionesTurno(familyGroupId),
+                    com.example.cuidafamily.repository.PagoRepository.escucharTarifas(familyGroupId, Role.ADMINISTRADOR_FAMILIAR)
+                ) { excepciones, tarifas -> Pair(excepciones, tarifas) }
+            ) { (turnos, checkIns, solicitudes), (excepciones, tarifas) ->
+                DataTuple5(turnos, checkIns, solicitudes, excepciones, tarifas)
+            }.collectLatest { (turnos, checkIns, solicitudes, excepciones, tarifas) ->
                 val activos = turnos.filter { it.activo }
                 val canceladosAvisos = turnos.filter { !it.activo && it.cuidadorUserId == userId && it.avisoParaCuidador.isNotBlank() }
 
@@ -112,20 +125,31 @@ class TurnoViewModel : ViewModel() {
                     turno.cuidadorUserId == userId && turno.confirmacion == EstadoConfirmacion.PENDIENTE && !turno.esVencido()
                 }
 
-                Log.d("TurnoViewModel", "Recibidos de Firestore: ${turnos.size} turnos; aplican a la semana visible: $m; pendientes del usuario: $p")
+                Log.d("TurnoViewModel", "Recibidos de Firestore: ${turnos.size} turnos, ${solicitudes.size} solicitudes, ${excepciones.size} excepciones, ${tarifas.size} tarifas")
 
                 _uiState.update {
                     it.copy(
                         todosLosTurnos = turnos,
                         turnosActivos = activos,
                         turnosCanceladosAvisos = canceladosAvisos,
+                        solicitudesIntercambio = solicitudes,
+                        excepcionesTurno = excepciones,
                         checkInsHoy = checkIns,
+                        tarifasMap = tarifas,
                         isLoading = false
                     )
                 }
             }
         }
     }
+
+    private data class DataTuple5(
+        val turnos: List<Turno>,
+        val checkIns: List<TurnoCheckIn>,
+        val solicitudes: List<SolicitudIntercambio>,
+        val excepciones: List<ExcepcionTurno>,
+        val tarifas: Map<String, Double>
+    )
 
     fun cargarDatos(familyGroupId: String) {
         val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
@@ -213,6 +237,126 @@ class TurnoViewModel : ViewModel() {
                 estado = estado,
                 checkIn = checkIn
             )
+        }
+    }
+
+    fun crearSolicitudIntercambio(
+        familyGroupId: String,
+        solicitud: SolicitudIntercambio,
+        turno: Turno
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            val result = TurnoRepository.crearSolicitudIntercambio(familyGroupId, solicitud, turno)
+            when (result) {
+                is Result.Success -> {
+                    _uiState.update { it.copy(isSaving = false, successMessage = "¡Solicitud de cambio enviada correctamente!") }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(isSaving = false, errorMessage = result.exception.message ?: "Error al enviar solicitud.") }
+                }
+            }
+        }
+    }
+
+    fun cancelarSolicitudIntercambio(familyGroupId: String, solicitudId: String) {
+        viewModelScope.launch {
+            val result = TurnoRepository.cancelarSolicitudIntercambio(familyGroupId, solicitudId)
+            when (result) {
+                is Result.Success -> {
+                    _uiState.update { it.copy(successMessage = "Solicitud cancelada.") }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(errorMessage = result.exception.message ?: "Error al cancelar solicitud.") }
+                }
+            }
+        }
+    }
+
+    fun aprobarSolicitudIntercambio(
+        familyGroupId: String,
+        solicitud: SolicitudIntercambio,
+        reemplazoUserId: String,
+        reemplazoNombre: String,
+        adminUserId: String,
+        adminNombre: String
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            val result = TurnoRepository.aprobarSolicitudIntercambio(
+                familyGroupId,
+                solicitud,
+                reemplazoUserId,
+                reemplazoNombre,
+                adminUserId,
+                adminNombre
+            )
+            when (result) {
+                is Result.Success -> {
+                    _uiState.update { it.copy(isSaving = false, successMessage = "¡Solicitud de cambio aprobada con éxito!") }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(isSaving = false, errorMessage = result.exception.message ?: "Error al aprobar solicitud.") }
+                }
+            }
+        }
+    }
+
+    fun rechazarSolicitudIntercambio(
+        familyGroupId: String,
+        solicitudId: String,
+        motivoRechazo: String,
+        adminUserId: String,
+        adminNombre: String
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            val result = TurnoRepository.rechazarSolicitudIntercambio(
+                familyGroupId,
+                solicitudId,
+                motivoRechazo,
+                adminUserId,
+                adminNombre
+            )
+            when (result) {
+                is Result.Success -> {
+                    _uiState.update { it.copy(isSaving = false, successMessage = "Solicitud de cambio rechazada.") }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(isSaving = false, errorMessage = result.exception.message ?: "Error al rechazar solicitud.") }
+                }
+            }
+        }
+    }
+
+    fun responderExcepcionTurno(
+        familyGroupId: String,
+        excepcionId: String,
+        confirmacion: EstadoConfirmacion
+    ) {
+        viewModelScope.launch {
+            val result = TurnoRepository.responderExcepcionTurno(familyGroupId, excepcionId, confirmacion)
+            when (result) {
+                is Result.Success -> {
+                    val msg = if (confirmacion == EstadoConfirmacion.CONFIRMADO) "¡Reemplazo confirmado! Cubrirás el turno." else "Reemplazo rechazado."
+                    _uiState.update { it.copy(successMessage = msg) }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(errorMessage = result.exception.message ?: "Error al responder al reemplazo.") }
+                }
+            }
+        }
+    }
+
+    fun marcarSolicitudVistaPorSolicitante(familyGroupId: String, solicitudId: String) {
+        viewModelScope.launch {
+            TurnoRepository.marcarSolicitudVistaPorSolicitante(familyGroupId, solicitudId)
+        }
+    }
+
+    fun marcarExcepcionVistaPorReemplazo(familyGroupId: String, excepcionId: String) {
+        viewModelScope.launch {
+            TurnoRepository.marcarExcepcionVistaPorReemplazo(familyGroupId, excepcionId)
         }
     }
 
@@ -333,7 +477,9 @@ class TurnoViewModel : ViewModel() {
         tareas: List<String>,
         creadoPorUserId: String,
         fechaInicio: Long = 0L,
-        fechaFin: Long? = null
+        fechaFin: Long? = null,
+        tarifaPorHora: Double? = null,
+        userRole: Role? = null
     ) {
         if (cuidadorUserId.isBlank() || diasSemana.isEmpty() || horaInicio.isBlank() || horaFin.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Selecciona un cuidador, días de la semana y horario.") }
@@ -362,6 +508,14 @@ class TurnoViewModel : ViewModel() {
             val result = TurnoRepository.crearTurno(familyGroupId, nuevoTurno)
             when (result) {
                 is Result.Success -> {
+                    if (tarifaPorHora != null && tarifaPorHora > 0.0) {
+                        com.example.cuidafamily.repository.PagoRepository.guardarTarifa(
+                            familyGroupId = familyGroupId,
+                            turnoId = nuevoTurno.id,
+                            tarifaPorHora = tarifaPorHora,
+                            userRole = userRole ?: Role.ADMINISTRADOR_FAMILIAR
+                        )
+                    }
                     _uiState.update { it.copy(isSaving = false, successMessage = "¡Turno asignado exitosamente!") }
                 }
                 is Result.Error -> {
@@ -371,12 +525,26 @@ class TurnoViewModel : ViewModel() {
         }
     }
 
-    fun modificarTurno(familyGroupId: String, turnoAnterior: Turno?, nuevoTurno: Turno) {
+    fun modificarTurno(
+        familyGroupId: String,
+        turnoAnterior: Turno?,
+        nuevoTurno: Turno,
+        tarifaPorHora: Double? = null,
+        userRole: Role? = null
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
             val result = TurnoRepository.editarTurno(familyGroupId, turnoAnterior, nuevoTurno)
             when (result) {
                 is Result.Success -> {
+                    if (tarifaPorHora != null && tarifaPorHora > 0.0) {
+                        com.example.cuidafamily.repository.PagoRepository.guardarTarifa(
+                            familyGroupId = familyGroupId,
+                            turnoId = nuevoTurno.id,
+                            tarifaPorHora = tarifaPorHora,
+                            userRole = userRole ?: Role.ADMINISTRADOR_FAMILIAR
+                        )
+                    }
                     _uiState.update { it.copy(isSaving = false, successMessage = "¡Turno actualizado correctamente!") }
                 }
                 is Result.Error -> {
@@ -404,3 +572,5 @@ class TurnoViewModel : ViewModel() {
         _uiState.update { it.copy(errorMessage = null, successMessage = null) }
     }
 }
+
+private data class Tuple4<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)

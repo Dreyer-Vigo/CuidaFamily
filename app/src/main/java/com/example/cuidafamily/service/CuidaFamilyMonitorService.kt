@@ -33,6 +33,8 @@ class CuidaFamilyMonitorService : Service() {
     private var bitacoraJob: Job? = null
     private var turnosJob: Job? = null
     private var eventosJob: Job? = null
+    private var solicitudesJob: Job? = null
+    private var excepcionesJob: Job? = null
 
     private var currentGroupId: String? = null
     private var currentUserId: String? = null
@@ -46,6 +48,12 @@ class CuidaFamilyMonitorService : Service() {
 
     private var isEventosInitialLoad = true
     private var previousEventosMap = mapOf<String, CalendarEvent>()
+
+    private var isSolicitudesInitialLoad = true
+    private var previousSolicitudesMap = mapOf<String, com.example.cuidafamily.model.SolicitudIntercambio>()
+
+    private var isExcepcionesInitialLoad = true
+    private var previousExcepcionesMap = mapOf<String, com.example.cuidafamily.model.ExcepcionTurno>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -311,6 +319,87 @@ class CuidaFamilyMonitorService : Service() {
                 previousEventosMap = eventsMap
             }
         }
+
+        solicitudesJob?.cancel()
+        solicitudesJob = serviceScope.launch {
+            TurnoRepository.obtenerSolicitudesIntercambio(familyGroupId).collectLatest { lista ->
+                val newMap = lista.associateBy { it.id }
+
+                if (!isSolicitudesInitialLoad) {
+                    for (sol in lista) {
+                        val prev = previousSolicitudesMap[sol.id]
+                        if (prev == null) {
+                            if (sol.estado == com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE && sol.solicitanteUserId != userId) {
+                                val titulo = "🔄 Solicitud de Cambio de Turno"
+                                val msg = "🔄 ${sol.solicitanteNombre} solicita cambiar su turno del ${sol.fecha} (${sol.horaInicio} - ${sol.horaFin})"
+                                NotificationHelper.mostrarNotificacionCambioTurno(
+                                    context = this@CuidaFamilyMonitorService,
+                                    turnoId = sol.id,
+                                    titulo = titulo,
+                                    mensaje = msg
+                                )
+                            }
+                        } else if (prev.estado != sol.estado) {
+                            if (sol.solicitanteUserId == userId && !sol.vistaPorSolicitante) {
+                                val (titulo, msg) = if (sol.estado == com.example.cuidafamily.model.EstadoSolicitud.APROBADA) {
+                                    Pair("✅ Cambio de Turno Aprobado", "✅ Tu cambio para el ${sol.fecha} fue aprobado.")
+                                } else {
+                                    Pair("❌ Cambio de Turno Rechazado", "❌ Tu solicitud del ${sol.fecha} fue rechazada: ${sol.motivoRechazo.ifBlank { "sin motivo" }}")
+                                }
+                                NotificationHelper.mostrarNotificacionCambioTurno(
+                                    context = this@CuidaFamilyMonitorService,
+                                    turnoId = sol.id,
+                                    titulo = titulo,
+                                    mensaje = msg
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    isSolicitudesInitialLoad = false
+                }
+
+                previousSolicitudesMap = newMap
+            }
+        }
+
+        excepcionesJob?.cancel()
+        excepcionesJob = serviceScope.launch {
+            TurnoRepository.obtenerExcepcionesTurno(familyGroupId).collectLatest { lista ->
+                val newMap = lista.associateBy { it.id }
+
+                if (!isExcepcionesInitialLoad) {
+                    for (exc in lista) {
+                        val prev = previousExcepcionesMap[exc.id]
+                        if (prev == null || prev.confirmacion != exc.confirmacion) {
+                            if (exc.cuidadorReemplazoUserId == userId && !exc.vistaPorReemplazo) {
+                                val titulo = "📅 Reemplazo de Turno Asignado"
+                                val msg = "📅 Se te asignó cubrir el turno del ${exc.fecha} (${exc.cuidadorOriginalNombre})"
+                                NotificationHelper.mostrarNotificacionCambioTurno(
+                                    context = this@CuidaFamilyMonitorService,
+                                    turnoId = exc.id,
+                                    titulo = titulo,
+                                    mensaje = msg
+                                )
+                            } else if (exc.confirmacion == EstadoConfirmacion.RECHAZADO && exc.cuidadorOriginalUserId != userId) {
+                                val titulo = "❌ Reemplazo Rechazado"
+                                val msg = "❌ ${exc.cuidadorReemplazoNombre} no puede cubrir el reemplazo del ${exc.fecha}"
+                                NotificationHelper.mostrarNotificacionCambioTurno(
+                                    context = this@CuidaFamilyMonitorService,
+                                    turnoId = exc.id,
+                                    titulo = titulo,
+                                    mensaje = msg
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    isExcepcionesInitialLoad = false
+                }
+
+                previousExcepcionesMap = newMap
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -320,6 +409,8 @@ class CuidaFamilyMonitorService : Service() {
         bitacoraJob?.cancel()
         turnosJob?.cancel()
         eventosJob?.cancel()
+        solicitudesJob?.cancel()
+        excepcionesJob?.cancel()
     }
 
     companion object {

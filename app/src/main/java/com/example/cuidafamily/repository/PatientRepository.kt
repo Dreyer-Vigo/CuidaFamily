@@ -59,7 +59,7 @@ object PatientRepository {
                 doc.reference.collection("datosSensibles").document("info")
                     .get()
                     .addOnSuccessListener { sensiblesDoc ->
-                        val fullPatient = mergeSensibles(basicPatient, sensiblesDoc)
+                        val fullPatient = mergeSensiblesAndMigrate(basicPatient, sensiblesDoc, doc)
                         trySend(fullPatient)
                     }
                     .addOnFailureListener {
@@ -87,7 +87,7 @@ object PatientRepository {
 
             val fullPatient = try {
                 val sensiblesDoc = doc.reference.collection("datosSensibles").document("info").get().await()
-                mergeSensibles(basicPatient, sensiblesDoc)
+                mergeSensiblesAndMigrate(basicPatient, sensiblesDoc, doc)
             } catch (e: Exception) {
                 basicPatient
             }
@@ -121,6 +121,7 @@ object PatientRepository {
                 "fotoUrl" to patient.fotoUrl,
                 "grupoSanguineo" to patient.grupoSanguineo,
                 "pesoActual" to patient.pesoActual,
+                "medicamentosActuales" to patient.medicamentosActuales,
                 "familyGroupId" to groupId
             )
 
@@ -133,7 +134,6 @@ object PatientRepository {
                 "contactoEmergenciaTelefono" to patient.contactoEmergenciaTelefono,
                 "contactoEmergenciaRelacion" to patient.contactoEmergenciaRelacion,
                 "enfermedadesCronicas" to patient.enfermedadesCronicas,
-                "medicamentosActuales" to patient.medicamentosActuales,
                 "informacionAdicional" to patient.informacionAdicional
             )
 
@@ -141,6 +141,15 @@ object PatientRepository {
             batch.set(patientRef, basicMap, SetOptions.merge())
             batch.set(patientRef.collection("datosSensibles").document("info"), sensiblesMap, SetOptions.merge())
             batch.commit().await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = groupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.FICHA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = patient.id,
+                descripcion = "Guardó la ficha médica de ${patient.nombre}",
+                detalleCambios = "Sección básica y datos de salud actualizados"
+            )
 
             Result.Success(Unit)
         } catch (e: Exception) {
@@ -158,6 +167,16 @@ object PatientRepository {
                 .collection("patients").document(patientId)
                 .delete()
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.FICHA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = patientId,
+                descripcion = "Eliminó la ficha del paciente",
+                detalleCambios = "Registro eliminado de Firestore"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarPatient", e)
@@ -175,6 +194,16 @@ object PatientRepository {
                 .collection("allergies").document(allergy.id)
                 .set(allergy)
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.ALERGIA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = allergy.id,
+                descripcion = "Agregó alergia: ${allergy.nombreAlergeno}",
+                detalleCambios = "Severidad: ${allergy.severidad.name}"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("agregarAlergia", e)
@@ -192,6 +221,16 @@ object PatientRepository {
                 .collection("allergies").document(allergyId)
                 .delete()
                 .await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.ALERGIA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = allergyId,
+                descripcion = "Eliminó una alergia de la ficha",
+                detalleCambios = "Alergia eliminada"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarAlergia", e)
@@ -212,6 +251,16 @@ object PatientRepository {
                 transaction.set(newWeightRef, weightRecord)
                 transaction.update(patientRef, "pesoActual", weightRecord.valorKg)
             }.await()
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.PESO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = patientId,
+                descripcion = "Registró peso: ${weightRecord.valorKg} kg",
+                detalleCambios = "Fecha: ${weightRecord.fecha}"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("agregarRegistroPeso", e)
@@ -273,7 +322,7 @@ object PatientRepository {
         if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
 
         try {
-            val basicKeys = setOf("nombre", "fechaNacimiento", "grupoSanguineo", "pesoActual", "fotoUrl", "familyGroupId")
+            val basicKeys = setOf("nombre", "fechaNacimiento", "grupoSanguineo", "pesoActual", "fotoUrl", "familyGroupId", "medicamentosActuales")
             val basicMap = cambios.filterKeys { it in basicKeys }
             val sensiblesMap = cambios.filterKeys { it !in basicKeys }
 
@@ -290,6 +339,20 @@ object PatientRepository {
             }
             batch.commit().await()
 
+            // Privacidad: Para datos sensibles se guarda SOLO el nombre del campo modificado, NUNCA su valor.
+            val sensiblesMod = sensiblesMap.keys.map { "$it: [modificado por privacidad]" }
+            val basicosMod = basicMap.map { (k, v) -> "$k: $v" }
+            val detalleStr = (basicosMod + sensiblesMod).joinToString(", ")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.FICHA,
+                accion = com.example.cuidafamily.model.AccionAuditoria.MODIFICAR,
+                entidadId = patientId,
+                descripcion = "Modificó campos de la ficha médica",
+                detalleCambios = detalleStr
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("actualizarCamposPatient", e)
@@ -305,12 +368,28 @@ object PatientRepository {
             fotoUrl = doc.getString("fotoUrl"),
             grupoSanguineo = doc.getString("grupoSanguineo") ?: "O+",
             pesoActual = doc.getDouble("pesoActual") ?: 0.0,
+            medicamentosActuales = doc.getString("medicamentosActuales") ?: "",
             familyGroupId = doc.getString("familyGroupId") ?: ""
         )
     }
 
-    private fun mergeSensibles(basic: Patient, sensiblesDoc: DocumentSnapshot?): Patient {
-        if (sensiblesDoc == null || !sensiblesDoc.exists()) return basic
+    private fun mergeSensiblesAndMigrate(basic: Patient, sensiblesDoc: DocumentSnapshot?, doc: DocumentSnapshot): Patient {
+        val sensiblesMed = sensiblesDoc?.getString("medicamentosActuales") ?: ""
+
+        val medFinal = if (basic.medicamentosActuales.isNotBlank()) {
+            basic.medicamentosActuales
+        } else if (sensiblesMed.isNotBlank()) {
+            doc.reference.update("medicamentosActuales", sensiblesMed)
+            Log.d("Migracion", "medicamentosActuales copiado al documento principal")
+            sensiblesMed
+        } else {
+            ""
+        }
+
+        if (sensiblesDoc == null || !sensiblesDoc.exists()) {
+            return basic.copy(medicamentosActuales = medFinal)
+        }
+
         return basic.copy(
             dni = sensiblesDoc.getString("dni") ?: "",
             historiaClinica = sensiblesDoc.getString("historiaClinica") ?: "",
@@ -320,7 +399,7 @@ object PatientRepository {
             contactoEmergenciaTelefono = sensiblesDoc.getString("contactoEmergenciaTelefono") ?: "",
             contactoEmergenciaRelacion = sensiblesDoc.getString("contactoEmergenciaRelacion") ?: "",
             enfermedadesCronicas = sensiblesDoc.getString("enfermedadesCronicas") ?: "",
-            medicamentosActuales = sensiblesDoc.getString("medicamentosActuales") ?: "",
+            medicamentosActuales = medFinal,
             informacionAdicional = sensiblesDoc.getString("informacionAdicional")
         )
     }

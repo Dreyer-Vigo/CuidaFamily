@@ -8,7 +8,6 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.Query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +18,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
+// TODO: migrar a Firebase Storage para compartir archivos completos sin límite de tamaño.
 
 object DocumentoRepository {
 
@@ -60,6 +59,16 @@ object DocumentoRepository {
 
             docRef.set(finalDoc.toMap()).await()
             Log.d("DocumentoRepository", "Documento guardado con ID: ${docRef.id}")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.DOCUMENTO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = docRef.id,
+                descripcion = "Subió documento: ${documento.nombre.ifBlank { "Sin título" }}",
+                detalleCambios = "Tipo: ${documento.tipo.etiqueta}, Fecha: ${documento.fechaDocumento}"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("subirDocumento", e)
@@ -88,7 +97,6 @@ object DocumentoRepository {
             .collection("patients")
             .document(patientId)
             .collection("documentos")
-            .orderBy("fechaDocumento", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     handleFirebaseException("obtenerDocumentos", error)
@@ -98,12 +106,76 @@ object DocumentoRepository {
 
                 val list = snapshot?.documents?.mapNotNull { doc ->
                     doc.toDocumentoMedico()
-                } ?: emptyList()
+                }?.sortedByDescending { it.fechaDocumento } ?: emptyList()
 
                 trySend(list)
             }
 
         awaitClose { listener.remove() }
+    }
+
+    suspend fun actualizarIndicaciones(
+        familyGroupId: String,
+        patientId: String,
+        documentoId: String,
+        nuevasIndicaciones: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) {
+            return@withContext Result.Error(Exception("Sesión no válida."))
+        }
+
+        try {
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("patients")
+                .document(patientId)
+                .collection("documentos")
+                .document(documentoId)
+                .update("indicaciones", nuevasIndicaciones.trim())
+                .await()
+
+            Log.d("DocumentoRepository", "Indicaciones actualizadas para documento $documentoId")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("actualizarIndicaciones", e)
+            Result.Error(Exception("No se pudieron actualizar las indicaciones."))
+        }
+    }
+
+    suspend fun actualizarImagenesBase64(
+        familyGroupId: String,
+        patientId: String,
+        documentoId: String,
+        imagenesBase64: List<String>,
+        paginasTotales: Int,
+        paginasCompartidas: Int
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val user = auth.currentUser
+        if (user == null) return@withContext Result.Error(Exception("Sesión no válida."))
+
+        try {
+            val updates = mapOf(
+                "imagenesBase64" to imagenesBase64,
+                "paginasTotales" to paginasTotales,
+                "paginasCompartidas" to paginasCompartidas
+            )
+
+            db.collection("familyGroups")
+                .document(familyGroupId)
+                .collection("patients")
+                .document(patientId)
+                .collection("documentos")
+                .document(documentoId)
+                .update(updates)
+                .await()
+
+            Log.d("DocumentoRepository", "Imágenes Base64 actualizadas para documento $documentoId ($paginasCompartidas/$paginasTotales páginas)")
+            Result.Success(Unit)
+        } catch (e: Exception) {
+            handleFirebaseException("actualizarImagenesBase64", e)
+            Result.Error(Exception("No se pudo compartir la copia del archivo con el grupo."))
+        }
     }
 
     suspend fun eliminarDocumento(
@@ -131,6 +203,16 @@ object DocumentoRepository {
                 .await()
 
             Log.d("DocumentoRepository", "Documento $documentoId eliminado correctamente")
+
+            AuditoriaRepository.registrar(
+                familyGroupId = familyGroupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.DOCUMENTO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.ELIMINAR,
+                entidadId = documentoId,
+                descripcion = "Eliminó un documento médico",
+                detalleCambios = "Nombre y tipo de documento eliminado de Firestore (contenido no almacenado)"
+            )
+
             Result.Success(Unit)
         } catch (e: Exception) {
             handleFirebaseException("eliminarDocumento", e)
@@ -151,6 +233,11 @@ object DocumentoRepository {
             val subidoPorNombre = getString("subidoPorNombre") ?: ""
             val uriLocal = getString("uriLocal") ?: ""
             val mimeType = getString("mimeType") ?: ""
+            val indicaciones = getString("indicaciones") ?: ""
+            val imagenBase64 = getString("imagenBase64") ?: ""
+            val imagenesBase64 = (get("imagenesBase64") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+            val paginasTotales = getLong("paginasTotales")?.toInt() ?: 0
+            val paginasCompartidas = getLong("paginasCompartidas")?.toInt() ?: 0
 
             DocumentoMedico(
                 id = id,
@@ -163,10 +250,15 @@ object DocumentoRepository {
                 subidoPorUserId = subidoPorUserId,
                 subidoPorNombre = subidoPorNombre,
                 uriLocal = uriLocal,
-                mimeType = mimeType
+                mimeType = mimeType,
+                indicaciones = indicaciones,
+                imagenBase64 = imagenBase64,
+                imagenesBase64 = imagenesBase64,
+                paginasTotales = paginasTotales,
+                paginasCompartidas = paginasCompartidas
             )
         } catch (e: Exception) {
-            Log.e("DocumentoRepository", "Error deserializando DocumentoMedico", e)
+            Log.e("DocumentoRepository", "Error deserializando DocumentoMedico ${id}", e)
             null
         }
     }
@@ -183,7 +275,12 @@ object DocumentoRepository {
             "subidoPorUserId" to subidoPorUserId,
             "subidoPorNombre" to subidoPorNombre,
             "uriLocal" to uriLocal,
-            "mimeType" to mimeType
+            "mimeType" to mimeType,
+            "indicaciones" to indicaciones,
+            "imagenBase64" to imagenBase64,
+            "imagenesBase64" to imagenesBase64,
+            "paginasTotales" to paginasTotales,
+            "paginasCompartidas" to paginasCompartidas
         )
     }
 

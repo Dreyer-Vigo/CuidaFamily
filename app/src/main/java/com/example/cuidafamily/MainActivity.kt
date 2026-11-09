@@ -73,6 +73,8 @@ import com.example.cuidafamily.model.Role
 import com.example.cuidafamily.repository.CalendarRepository
 import com.example.cuidafamily.repository.PatientRepository
 import com.example.cuidafamily.repository.Result
+import com.example.cuidafamily.ui.medicacion.MedicacionScreenContainer
+import com.example.cuidafamily.ui.medicacion.MedicacionViewModel
 import com.example.cuidafamily.service.CuidaFamilyMonitorService
 import com.example.cuidafamily.ui.auth.AuthFlowContainer
 import com.example.cuidafamily.ui.auth.AuthViewModel
@@ -111,6 +113,10 @@ class MainActivity : ComponentActivity() {
     private val bitacoraViewModel: BitacoraViewModel by viewModels()
     private val documentoViewModel: DocumentoViewModel by viewModels()
     private val turnoViewModel: TurnoViewModel by viewModels()
+    private val medicacionViewModel: MedicacionViewModel by viewModels()
+    private val gastoViewModel: com.example.cuidafamily.ui.gastos.GastoViewModel by viewModels()
+    private val pagoViewModel: com.example.cuidafamily.ui.gastos.PagoViewModel by viewModels()
+    private val auditoriaViewModel: com.example.cuidafamily.ui.auditoria.AuditoriaViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +127,8 @@ class MainActivity : ComponentActivity() {
         }
 
         NotificationHelper.inicializarCanales(this)
+        com.example.cuidafamily.util.RecordatorioScheduler.crearCanalMedicacion(this)
+        com.example.cuidafamily.util.RecordatorioScheduler.crearCanalAlarmaPrevia(this)
 
         setContent {
             CuidaFamilyTheme {
@@ -184,6 +192,11 @@ class MainActivity : ComponentActivity() {
                     } else if (intentDestination == "turnos") {
                         (context as? ComponentActivity)?.intent?.removeExtra("NAVIGATE_TO")
                         navController.navigate("turnos") {
+                            launchSingleTop = true
+                        }
+                    } else if (intentDestination == "medicacion") {
+                        (context as? ComponentActivity)?.intent?.removeExtra("NAVIGATE_TO")
+                        navController.navigate("medicacion") {
                             launchSingleTop = true
                         }
                     }
@@ -261,7 +274,15 @@ class MainActivity : ComponentActivity() {
                                     t.cuidadorUserId == userId && t.confirmacion == EstadoConfirmacion.PENDIENTE && !t.esVencido()
                                 }
 
-                                val totalTurnosBadge = unreadRespuestasCount + pendingTurnosCount
+                                val pendingSolicitudesAdminCount = if (authState.selectedRole == Role.ADMINISTRADOR_FAMILIAR) {
+                                    turnoState.solicitudesIntercambio.count { it.estado == com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE }
+                                } else 0
+
+                                val pendingReemplazosCaregiverCount = if (authState.selectedRole == Role.CUIDADOR_EXTERNO) {
+                                    turnoState.excepcionesTurno.count { it.cuidadorReemplazoUserId == userId && it.confirmacion == EstadoConfirmacion.PENDIENTE }
+                                } else 0
+
+                                val totalTurnosBadge = unreadRespuestasCount + pendingTurnosCount + pendingSolicitudesAdminCount + pendingReemplazosCaregiverCount
 
                                 WelcomeScreen(
                                     userName = authState.nombre,
@@ -270,14 +291,26 @@ class MainActivity : ComponentActivity() {
                                     unreadBitacoraCount = bitacoraState.noVistasCount,
                                     pendingCalendarCount = pendingCalendarCount,
                                     pendingTurnosCount = totalTurnosBadge,
+                                    turnoState = turnoState,
+                                    familyGroupId = familyGroupId,
+                                    userId = userId,
+                                    onMarcarSolicitudVista = { id -> turnoViewModel.marcarSolicitudVistaPorSolicitante(familyGroupId, id) },
+                                    onMarcarExcepcionVista = { id -> turnoViewModel.marcarExcepcionVistaPorReemplazo(familyGroupId, id) },
                                     onNavigateToFicha = { navController.navigate("ficha") },
+                                    onNavigateToMedicacion = { navController.navigate("medicacion") },
                                     onNavigateToCalendario = { navController.navigate("calendario") },
                                     onNavigateToBitacora = { navController.navigate("bitacora") },
                                     onNavigateToTurnos = { navController.navigate("turnos") },
+                                    onNavigateToGastos = { navController.navigate("gastos") },
+                                    onNavigateToAuditoria = { navController.navigate("auditoria") },
                                     onNavigateToGrupo = { navController.navigate("grupo_familiar") },
                                     onSosClick = { sosViewModel.solicitarConfirmacionSos() },
                                     onLogout = {
                                         CuidaFamilyMonitorService.detenerServicio(context)
+                                        auditoriaViewModel.limpiar()
+                                        pagoViewModel.limpiar()
+                                        gastoViewModel.limpiar()
+                                        medicacionViewModel.limpiar()
                                         turnoViewModel.limpiar()
                                         bitacoraViewModel.limpiar()
                                         calendarViewModel.limpiar()
@@ -305,11 +338,29 @@ class MainActivity : ComponentActivity() {
                                         userName = userName,
                                         onBackClick = { navController.popBackStack() },
                                         onNavigateToDocumentos = { navController.navigate("documentos") },
+                                        onNavigateToMedicacion = { navController.navigate("medicacion") },
                                         onSosClick = { sosViewModel.solicitarConfirmacionSos() }
                                     )
                                 } else {
                                     ErrorGroupScreen { navController.popBackStack() }
                                 }
+                            }
+
+                            composable("medicacion") {
+                                val familyGroupId = authState.familyGroupId ?: ""
+                                val activeUser = FirebaseAuth.getInstance().currentUser
+                                val userId = activeUser?.uid ?: ""
+
+                                LaunchedEffect(userId, familyGroupId) {
+                                    if (userId.isNotBlank() && familyGroupId.isNotBlank()) {
+                                        medicacionViewModel.iniciar(userId, familyGroupId)
+                                    }
+                                }
+
+                                MedicacionScreenContainer(
+                                    viewModel = medicacionViewModel,
+                                    onBack = { navController.popBackStack() }
+                                )
                             }
 
                             composable("calendario") {
@@ -461,6 +512,64 @@ class MainActivity : ComponentActivity() {
                                     ErrorGroupScreen { navController.popBackStack() }
                                 }
                             }
+
+                            composable("gastos") {
+                                val familyGroupId = authState.familyGroupId
+                                val userRole = authState.selectedRole
+                                val userName = authState.nombre
+                                val activeUser = FirebaseAuth.getInstance().currentUser
+                                val currentUserId = activeUser?.uid ?: ""
+
+                                if (familyGroupId != null && com.example.cuidafamily.util.Permisos.puedeVerFinanzas(userRole)) {
+                                    com.example.cuidafamily.ui.gastos.GastoScreenContainer(
+                                        viewModel = gastoViewModel,
+                                        pagoViewModel = pagoViewModel,
+                                        familyGroupId = familyGroupId,
+                                        currentUserId = currentUserId,
+                                        userName = userName,
+                                        userRole = userRole,
+                                        onBackClick = { navController.popBackStack() },
+                                        onRedirectHome = {
+                                            navController.navigate("home") {
+                                                popUpTo("home") { inclusive = true }
+                                            }
+                                        }
+                                    )
+                                } else {
+                                    LaunchedEffect(Unit) {
+                                        navController.navigate("home") {
+                                            popUpTo("home") { inclusive = true }
+                                        }
+                                    }
+                                }
+                            }
+
+                            composable("auditoria") {
+                                val familyGroupId = authState.familyGroupId
+                                val userRole = authState.selectedRole
+                                val userName = authState.nombre
+
+                                if (familyGroupId != null && userRole == Role.ADMINISTRADOR_FAMILIAR) {
+                                    com.example.cuidafamily.ui.auditoria.AuditoriaScreenContainer(
+                                        viewModel = auditoriaViewModel,
+                                        familyGroupId = familyGroupId,
+                                        userRole = userRole,
+                                        userName = userName,
+                                        onBackClick = { navController.popBackStack() },
+                                        onRedirectHome = {
+                                            navController.navigate("home") {
+                                                popUpTo("home") { inclusive = true }
+                                            }
+                                        }
+                                    )
+                                } else {
+                                    LaunchedEffect(Unit) {
+                                        navController.navigate("home") {
+                                            popUpTo("home") { inclusive = true }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         if (sosState.showConfirmDialog) {
@@ -547,17 +656,141 @@ fun WelcomeScreen(
     unreadBitacoraCount: Int = 0,
     pendingCalendarCount: Int = 0,
     pendingTurnosCount: Int = 0,
+    turnoState: com.example.cuidafamily.ui.turnos.TurnoUiState? = null,
+    familyGroupId: String = "",
+    userId: String = "",
+    onMarcarSolicitudVista: (String) -> Unit = {},
+    onMarcarExcepcionVista: (String) -> Unit = {},
     onNavigateToFicha: () -> Unit,
+    onNavigateToMedicacion: () -> Unit = {},
     onNavigateToCalendario: () -> Unit,
     onNavigateToBitacora: () -> Unit,
     onNavigateToTurnos: () -> Unit,
+    onNavigateToGastos: () -> Unit = {},
+    onNavigateToAuditoria: () -> Unit = {},
     onNavigateToGrupo: () -> Unit,
     onSosClick: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     var showNoticeDialog by remember { mutableStateOf(true) }
 
-    if (showNoticeDialog && pendingTurnosCount > 0 && userRole == Role.CUIDADOR_EXTERNO) {
+    val pendingSolicitudesAdmin = if (userRole == Role.ADMINISTRADOR_FAMILIAR && turnoState != null) {
+        turnoState.solicitudesIntercambio.filter { it.estado == com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE }
+    } else emptyList()
+
+    val solNotif = if (turnoState != null) {
+        turnoState.solicitudesIntercambio.firstOrNull { it.solicitanteUserId == userId && !it.vistaPorSolicitante && it.estado != com.example.cuidafamily.model.EstadoSolicitud.PENDIENTE }
+    } else null
+
+    val excNotif = if (turnoState != null) {
+        turnoState.excepcionesTurno.firstOrNull { it.cuidadorReemplazoUserId == userId && !it.vistaPorReemplazo }
+    } else null
+
+    if (showNoticeDialog) {
+        if (pendingSolicitudesAdmin.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { showNoticeDialog = false },
+                title = { Text("Solicitudes de Cambio de Turno", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                text = {
+                    Text(
+                        "Tienes ${pendingSolicitudesAdmin.size} solicitud(es) de cambio de turno pendiente(s) de revisión.",
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showNoticeDialog = false
+                            onNavigateToTurnos()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Ver solicitudes", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { showNoticeDialog = false },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Más tarde", color = Color.Gray)
+                    }
+                },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp)
+            )
+        } else if (solNotif != null) {
+            val esAprobada = solNotif.estado == com.example.cuidafamily.model.EstadoSolicitud.APROBADA
+            AlertDialog(
+                onDismissRequest = {
+                    showNoticeDialog = false
+                    onMarcarSolicitudVista(solNotif.id)
+                },
+                title = { Text(if (esAprobada) "✅ Cambio Aprobado" else "❌ Solicitud Rechazada", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                text = {
+                    Text(
+                        if (esAprobada) "Tu solicitud de cambio de turno para el ${solNotif.fecha} fue APROBADA."
+                        else "Tu solicitud de cambio de turno para el ${solNotif.fecha} fue RECHAZADA: ${solNotif.motivoRechazo.ifBlank { "Sin motivo especificado" }}",
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showNoticeDialog = false
+                            onMarcarSolicitudVista(solNotif.id)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Entendido", fontWeight = FontWeight.Bold)
+                    }
+                },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp)
+            )
+        } else if (excNotif != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    showNoticeDialog = false
+                    onMarcarExcepcionVista(excNotif.id)
+                },
+                title = { Text("📅 Reemplazo Asignado", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                text = {
+                    Text(
+                        "Se te asignó cubrir el turno del ${excNotif.fecha} (titular original: ${excNotif.cuidadorOriginalNombre}). Por favor confirma tu disponibilidad.",
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showNoticeDialog = false
+                            onMarcarExcepcionVista(excNotif.id)
+                            onNavigateToTurnos()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LavandaPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Ver turno", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = {
+                            showNoticeDialog = false
+                            onMarcarExcepcionVista(excNotif.id)
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Más tarde", color = Color.Gray)
+                    }
+                },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp)
+            )
+        } else if (pendingTurnosCount > 0 && userRole == Role.CUIDADOR_EXTERNO) {
         AlertDialog(
             onDismissRequest = { showNoticeDialog = false },
             title = { Text("Turnos Pendientes", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
@@ -590,6 +823,7 @@ fun WelcomeScreen(
             containerColor = Color.White,
             shape = RoundedCornerShape(20.dp)
         )
+        }
     }
 
     AppBackgroundDecorated {
@@ -624,6 +858,12 @@ fun WelcomeScreen(
                     GradientButton(
                         text = "Ficha Médica",
                         onClick = onNavigateToFicha,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    GradientButton(
+                        text = "Control de Medicación",
+                        onClick = onNavigateToMedicacion,
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -724,6 +964,22 @@ fun WelcomeScreen(
                                 }
                             }
                         }
+                    }
+
+                    if (com.example.cuidafamily.util.Permisos.puedeVerFinanzas(userRole)) {
+                        GradientButton(
+                            text = "Registro de Gastos / Finanzas",
+                            onClick = onNavigateToGastos,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (userRole == Role.ADMINISTRADOR_FAMILIAR) {
+                        GradientButton(
+                            text = "Reportes e Historial (Auditoría)",
+                            onClick = onNavigateToAuditoria,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
                     Button(

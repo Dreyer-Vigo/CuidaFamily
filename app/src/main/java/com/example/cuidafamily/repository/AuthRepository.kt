@@ -117,6 +117,15 @@ object AuthRepository {
             
             batch.commit().await()
 
+            AuditoriaRepository.registrar(
+                familyGroupId = groupId,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.GRUPO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = groupId,
+                descripcion = "Creó el grupo familiar '$nombre'",
+                detalleCambios = "Administrador asignado: ${miembroAdmin.nombre}"
+            )
+
             Result.Success(nuevoGrupo)
         } catch (e: Exception) {
             handleFirebaseException("crearFamilyGroup", e)
@@ -167,6 +176,15 @@ object AuthRepository {
             
             batch.commit().await()
 
+            AuditoriaRepository.registrar(
+                familyGroupId = grupo.id,
+                entidad = com.example.cuidafamily.model.EntidadAuditoria.GRUPO,
+                accion = com.example.cuidafamily.model.AccionAuditoria.CREAR,
+                entidadId = userId,
+                descripcion = "Se unió al grupo familiar '${grupo.nombre}'",
+                detalleCambios = "Rol: ${rol.name}, Subtipo: $subtipo"
+            )
+
             Result.Success(grupo)
         } catch (e: Exception) {
             handleFirebaseException("unirseAGrupo", e)
@@ -184,7 +202,12 @@ object AuthRepository {
 
             val listaInfo = membersSnapshot.documents.mapNotNull { doc ->
                 val member = try {
-                    doc.toObject(GroupMember::class.java)
+                    val m = doc.toObject(GroupMember::class.java)
+                    if (m != null && m.userId.isBlank()) {
+                        m.copy(userId = doc.id)
+                    } else {
+                        m
+                    }
                 } catch (e: Exception) {
                     Log.e("AuthRepository", "Error deserializing GroupMember in Group: $familyGroupId", e)
                     null

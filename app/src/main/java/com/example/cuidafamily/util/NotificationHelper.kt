@@ -56,6 +56,23 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+            val channelMedicacion = NotificationChannel(
+                RecordatorioScheduler.CHANNEL_ID,
+                "Recordatorios de Medicación",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Canal para avisos y alarmas de tomas de medicación"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 100, 250)
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
+
             val channelRecordatorios = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
@@ -166,6 +183,8 @@ object NotificationHelper {
                 enableVibration(false)
             }
 
+            notificationManager.createNotificationChannel(channelMedicacion)
+            RecordatorioScheduler.crearCanalAlarmaPrevia(context)
             notificationManager.createNotificationChannel(channelRecordatorios)
             notificationManager.createNotificationChannel(channelBitacora)
             notificationManager.createNotificationChannel(channelTurnos)

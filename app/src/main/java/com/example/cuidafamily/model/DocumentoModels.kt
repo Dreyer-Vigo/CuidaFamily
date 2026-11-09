@@ -38,5 +38,22 @@ data class DocumentoMedico(
     val subidoPorUserId: String = "",
     val subidoPorNombre: String = "",
     val uriLocal: String = "",
-    val mimeType: String = ""
-)
+    val mimeType: String = "",
+    val indicaciones: String = "",
+    val imagenBase64: String = "",
+    val imagenesBase64: List<String> = emptyList(),
+    val paginasTotales: Int = 0,
+    val paginasCompartidas: Int = 0
+) {
+    val paginasBase64: List<String>
+        get() = if (imagenesBase64.isNotEmpty()) {
+            imagenesBase64
+        } else if (imagenBase64.isNotBlank()) {
+            listOf(imagenBase64)
+        } else {
+            emptyList()
+        }
+
+    val estaCompartidoConGrupo: Boolean
+        get() = paginasBase64.isNotEmpty()
+}
